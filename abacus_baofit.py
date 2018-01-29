@@ -257,17 +257,17 @@ def do_coadd_xi(model_name):
     xi_0_array = np.array(xi_0_list)
     xi_2_array = np.array(xi_2_list)
     # the first column, r, is unaffected under coadding, because same for all
-    s_bins = np.arange(1, 150 + step_s_bins, step_s_bins)
-    s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
-    mu_bins = np.linspace(0, 1, np.int(1/step_mu_bins+1))
-    xi_s_mu_ca = np.median(xi_array, axis=0)
+    # s_bins = np.arange(1, 150 + step_s_bins, step_s_bins)
+    # s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
+    # mu_bins = np.linspace(0, 1, np.int(1/step_mu_bins+1))
+    xi_s_mu_ca = np.mean(xi_array, axis=0)
     xi_s_mu_err = np.std(xi_array, axis=0)
-    # two ways of calculating 0, 2 components
-    xi_0 = tpcf_multipole(xi_s_mu_ca, mu_bins, order=0)  # from coadded xi_s_mu
-    xi_0_ca = np.median(xi_0_array, axis=0)  # from coadding xi_0
+    # two ways of calculating 0, 2 components are the same, linear operation
+    # xi_0 = tpcf_multipole(xi_s_mu_ca, mu_bins, order=0)  # from coadded xi_s_mu
+    xi_0_ca = np.mean(xi_0_array, axis=0)  # from coadding xi_0
     xi_0_err = np.std(xi_0_array, axis=0)
-    xi_2 = tpcf_multipole(xi_s_mu_ca, mu_bins, order=2)  # from coadded xi_s_mu
-    xi_2_ca = np.median(xi_2_array, axis=0)  # from coadding xi_2
+    # xi_2 = tpcf_multipole(xi_s_mu_ca, mu_bins, order=2)  # from coadded xi_s_mu
+    xi_2_ca = np.mean(xi_2_array, axis=0)  # from coadding xi_2
     xi_2_err = np.std(xi_2_array, axis=0)
 
     # save all results
@@ -285,18 +285,18 @@ def do_coadd_xi(model_name):
     np.savetxt(os.path.join(
             filedir, '{}-auto-xi_s_mu-coadd_err.txt'.format(model_name)),
         xi_s_mu_err, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_0-from_xi_coadd.txt'.format(model_name)),
-        np.vstack([s_bins_centre, xi_0]).transpose(), fmt=txtfmt)
+#    np.savetxt(os.path.join(
+#            filedir, '{}-auto-xi_0-from_xi_coadd.txt'.format(model_name)),
+#        np.vstack([s_bins_centre, xi_0]).transpose(), fmt=txtfmt)
     np.savetxt(os.path.join(
             filedir, '{}-auto-xi_0-coadd.txt'.format(model_name)),
         xi_0_ca, fmt=txtfmt)
     np.savetxt(os.path.join(
             filedir, '{}-auto-xi_0-coadd_err.txt'.format(model_name)),
         xi_0_err, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_2-from_xi_coadd.txt'.format(model_name)),
-        np.vstack([s_bins_centre, xi_2]).transpose(), fmt=txtfmt)
+#    np.savetxt(os.path.join(
+#            filedir, '{}-auto-xi_2-from_xi_coadd.txt'.format(model_name)),
+#        np.vstack([s_bins_centre, xi_2]).transpose(), fmt=txtfmt)
     np.savetxt(os.path.join(
             filedir, '{}-auto-xi_2-coadd.txt'.format(model_name)),
         xi_2_ca, fmt=txtfmt)
