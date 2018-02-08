@@ -29,7 +29,7 @@ prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
 halo_type = 'Rockstar'
 redshift = 0.700  # one redshift at a time instead of 'all'
 cosmology = 0  # use with only one cosmology at a time instead of 'all'
-phases = list(range(16))  # [0, 1] # list(range(16)) # 'all'
+phases = [0, 1]  # list(range(16))  # [0, 1] # list(range(16)) # 'all'
 
 # HOD models
 prebuilt_models = ['zheng07']
@@ -94,8 +94,9 @@ def peebles_estimator(ND1, NR, D1D2, D2R1):
 
 def make_halocat(phase):
 
-    print('Importing halo catelogue: {}-{}/z{}'.format(
-        prod_dir + sim_name_prefix + cosmology, phase, redshift))
+    print('--- \n Importing halo catelogue: {}{}_{:02}-{}/z{}/'
+          .format(prod_dir, sim_name_prefix, cosmology, phase, redshift))
+
     halocats = ht.make_catalogs(
         sim_name=sim_name_prefix, products_dir=prod_dir,
         redshifts=[redshift], cosmologies=[cosmology], phases=[phase],
@@ -107,8 +108,10 @@ def make_halocat(phase):
     halocat = halocats[0][0][0]
 
     # fill in fields required by HOD models
-    halocat.halo_table['halo_mvir'] = halocat.halo_table['halo_m']
-    halocat.halo_table['halo_rvir'] = halocat.halo_table['halo_r']
+    if 'halo_mvir' not in halocat.halo_table.keys():
+        halocat.halo_table['halo_mvir'] = halocat.halo_table['halo_m']
+    if 'halo_rvir' not in halocat.halo_table.keys():
+        halocat.halo_table['halo_rvir'] = halocat.halo_table['halo_r']
     add_halo_hostid(halocat.halo_table, delete_possibly_existing_column=True)
     # setting NFW concentration, klypin_rs is more stable
     # can be improved following https://arxiv.org/abs/1709.07099
@@ -118,9 +121,9 @@ def make_halocat(phase):
     return halocat
 
 
-def populate_halocat(halocat, model_name, num_cut=1):
+def populate_halocat(halocat, model_name, num_cut=1, save_model=True):
 
-    print('Initialising HOD model {}...'.format(model_name))
+    print('Initialising HOD model: {}...'.format(model_name))
     if model_name == 'zheng07':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=halocat.redshift,
@@ -166,16 +169,18 @@ def populate_halocat(halocat, model_name, num_cut=1):
           .format(len(model.mock.galaxy_table)))
     # save this particular monte carlo realisation of the model
     sim_name = model.mock.header['SimName']
-    filedir = os.path.join(save_dir, sim_name, 'z'+str(redshift))
-    filepath = os.path.join(filedir,
-                            '{}-z{}-{}-galaxy_table.pkl'
-                            .format(sim_name, redshift, model_name))
-    if not os.path.exists(filedir):
-        os.makedirs(filedir)
-    print('Pickle dumping galaxy table...')
-    with open(filepath, 'wb') as handle:
-        pickle.dump(model.mock.galaxy_table, handle,
-                    protocol=pickle.HIGHEST_PROTOCOL)
+
+    if save_model:
+        filedir = os.path.join(save_dir, sim_name, 'z'+str(redshift))
+        if not os.path.exists(filedir):
+            os.makedirs(filedir)
+        filepath = os.path.join(filedir,
+                                '{}-z{}-{}-galaxy_table.pkl'
+                                .format(sim_name, redshift, model_name))
+        print('Pickle dumping galaxy table...')
+        with open(filepath, 'wb') as handle:
+            pickle.dump(model.mock.galaxy_table, handle,
+                        protocol=pickle.HIGHEST_PROTOCOL)
 
     return model
 
@@ -266,6 +271,14 @@ def do_subcross_count(model, n_sub):
             gt_sub = gt[mask]  # select a subvolume of the galaxy table
             print('Subvolume {} of {} mask created, {} of {} galaxies selected'
                   .format(linind+1, n_sub**3, len(gt_sub), len(gt)))
+            print('min x, y, z: ',
+                  np.min(gt_sub['x']),
+                  np.min(gt_sub['y']),
+                  np.min(gt_sub['y']))
+            print('max x, y, z: ',
+                  np.max(gt_sub['x']),
+                  np.max(gt_sub['y']),
+                  np.max(gt_sub['y']))
             print('Pair counting cross-xi with Corrfunc.DDsmu, {} threads...'
                   .format(n_threads))
             # calculate D1D2, where D1 is entire box, and D2 is subvolume
@@ -275,11 +288,13 @@ def do_subcross_count(model, n_sub):
                          verbose=True, boxsize=L, c_api_timer=True)
             # calculate D2R, where R sample is homogeneous in volume of box
             NR = ND1 * 3
-            xr = np.random.uniform(0, L, NR)
-            yr = np.random.uniform(0, L, NR)
-            zr = np.random.uniform(0, L, NR)
+            # force float32 (single precision float in C) to be consistent
+            # with galaxy table precision
+            xr = np.random.uniform(0, L, NR).astype(np.float32)
+            yr = np.random.uniform(0, L, NR).astype(np.float32)
+            zr = np.random.uniform(0, L, NR).astype(np.float32)
             D2R1 = DDsmu(0, n_threads, s_bins_counts, mu_max, n_mu_bins,
-                         xr, yr, zr, period=True, X2=x2, Y2=y2, Z2=z2,
+                         xr, yr, zr, periodic=True, X2=x2, Y2=y2, Z2=z2,
                          verbose=True, boxsize=L, c_api_timer=True)
             # save counting results as original structured array in npy format
             filedir = os.path.join(save_dir, sim_name, 'z'+str(redshift))
@@ -691,10 +706,11 @@ if __name__ == "__main__":
         for model_name in prebuilt_models:
             # data processing
             cat = make_halocat(phase)
-            model0 = populate_halocat(cat, model_name=model_name, num_cut=1)
+            model0 = populate_halocat(cat, model_name=model_name,
+                                      num_cut=1, save_model=False)
             model = load_model(cat, model0)
             # print(model0==model)
-            do_auto_count(model)  # do the pair counting in 1 Mpc bins
+            # do_auto_count(model)  # do the pair counting in 1 Mpc bins
             do_subcross_count(model, n_sub=3)
             do_auto_correlation(model)  # sum into specified bins
             do_subcross_correlation(model)
