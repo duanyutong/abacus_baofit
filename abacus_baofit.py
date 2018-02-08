@@ -29,10 +29,10 @@ prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
 halo_type = 'Rockstar'
 redshift = 0.700  # one redshift at a time instead of 'all'
 cosmology = 0  # use with only one cosmology at a time instead of 'all'
-phases = list(range(16))  # [0, 1] # list(range(16)) # 'all'
+phases = [0, 1]  # [0, 1] # list(range(16)) # 'all'
 
 # HOD models
-prebuilt_models = ['zheng07', 'leauthaud11', 'tinker13']
+prebuilt_models = ['zheng07']
 # prebuilt_models = ['zheng07', 'leauthaud11', 'tinker13', 'hearin15',
 #                   'zu_mandelbaum15', 'zu_mandelbaum16', 'cacciato09']
 step_s_bins = 5  # mpc/h
@@ -40,6 +40,7 @@ step_mu_bins = 0.05
 n_threads = 10
 save_dir = os.path.join('/home/dyt/analysis_data/', sim_name_prefix)
 use_corrfunc = True
+use_analytic_DR = True  # save 8 minutes per run
 # use_jackknife = False
 txtfmt = b'%.30e'
 
@@ -50,6 +51,42 @@ mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
 s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0
 n_mu_bins = 100  # count with mu bin size 0.01
+
+
+def auto_analytic_random(ND, s_bins, mu_bins, Lbox):
+    '''
+    for auto-correlation only
+    '''
+    NR = ND
+    mu_bins_reverse_sorted = np.sort(mu_bins)[::-1]
+    dv = spherical_sector_volume(s_bins, mu_bins_reverse_sorted)
+    dv = np.diff(dv, axis=1)  # volume of wedges
+    dv = np.diff(dv, axis=0)  # volume of wedge sector
+    V = Lbox.prod()  # volume of entire simulation box
+    DR = ND*(ND-1)/V*dv  # calculate randoms for sample1 and 2
+    RR = NR*(NR-1)/V*dv  # calculate the random-random pairs.
+
+    return DR, RR
+
+
+def cross_analytic_random(ND1, s_bins, mu_bins, Lbox, ND2=0):
+    '''
+    for cross-correlation only
+    '''
+    NR1 = ND1
+    NR2 = ND2
+    mu_bins_reverse_sorted = np.sort(mu_bins)[::-1]
+    dv = spherical_sector_volume(s_bins, mu_bins_reverse_sorted)
+    dv = np.diff(dv, axis=1)  # volume of wedges
+    dv = np.diff(dv, axis=0)  # volume of wedge sector
+    V = Lbox.prod()  # volume of entire simulation box
+    # calculate randoms for sample1 and 2
+    D1R2 = np.square(ND1)/V*dv
+    R1D2 = np.square(ND2)/V*dv
+    # calculate the random-random pairs.
+    R1R2 = NR1*NR2/V*dv
+
+    return D1R2, R1D2, R1R2
 
 
 def ph_estimator(ND, NR, DD, RR):
@@ -66,29 +103,12 @@ def ph_estimator(ND, NR, DD, RR):
         return None
 
 
-def analytic_random_counts(N1, s_bins, mu_bins, Lbox, N2=0):
-    ''' for auto-correlation only '''
-    NR = N1
-    mu_bins_reverse_sorted = np.sort(mu_bins)[::-1]
-    dv = spherical_sector_volume(s_bins, mu_bins_reverse_sorted)
-    dv = np.diff(dv, axis=1)  # volume of wedges
-    dv = np.diff(dv, axis=0)  # volume of wedge sector
-    V = model.mock.Lbox.prod()  # volume of entire simulation box
-    # calculate randoms for sample1 and 2
-    D1R = N1*(N1-1)/V*dv
-    D2R = N2*(N2-1)/V*dv
-    # calculate the random-random pairs.
-    RR = NR*(NR-1)/V*dv
-
-    return D1R, D2R, RR
-
-
-def peebles_estimator(ND1, NR, D1D2, D2R1):
+def peebles_estimator(ND1, NR, D1D2, R1D2):
     '''
     Given in Knobel (2012): https://arxiv.org/abs/1207.0005, equation 15
     for cross-correlation only
     '''
-    xi = NR/ND1*D1D2/D2R1 - 1
+    xi = NR/ND1*D1D2/R1D2 - 1
     return xi
 
 
@@ -123,6 +143,10 @@ def make_halocat(phase):
 
 def populate_halocat(halocat, model_name, num_cut=1, save_model=True):
 
+    '''
+    zheng07 wiht default parameters results in ~ 1.5E7 galaxies
+    other models should match this
+    '''
     print('Initialising HOD model: {}...'.format(model_name))
     if model_name == 'zheng07':
         model = PrebuiltHodModelFactory('zheng07',
@@ -131,32 +155,32 @@ def populate_halocat(halocat, model_name, num_cut=1, save_model=True):
         # model_instance.param_dict['logMmin'] = 12.1
         # model_instance.mock.populate()
 
-    if model_name == 'leauthaud11':
+    elif model_name == 'leauthaud11':
         model = PrebuiltHodModelFactory('leauthaud11',
                                         redshift=halocat.redshift,
-                                        threshold=11)
+                                        threshold=-18)
 
-    if model_name == 'tinker13':
+    elif model_name == 'tinker13':
         model = PrebuiltHodModelFactory(
                     'tinker13',
                     redshift=halocat.redshift,
-                    threshold=11,
+                    threshold=-18,
                     quiescent_fraction_abscissa=[1e12, 1e13, 1e14, 1e15],
                     quiescent_fraction_ordinates=[0.25, 0.5, 0.75, 0.9])
 
-    if model_name == 'hearin15':
+    elif model_name == 'hearin15':
         model = PrebuiltHodModelFactory('hearin15',
                                         redshift=halocat.redshift,
                                         threshold=11)
-    if model_name == 'zu_mandelbaum15':
+    elif model_name == 'zu_mandelbaum15':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=halocat.redshift,
                                         threshold=-1)
-    if model_name == 'zu_mandelbaum16':
+    elif model_name == 'zu_mandelbaum16':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=halocat.redshift,
                                         threshold=-1)
-    if model_name == 'cacciato09':
+    elif model_name == 'cacciato09':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=halocat.redshift,
                                         threshold=-1)
@@ -181,17 +205,21 @@ def populate_halocat(halocat, model_name, num_cut=1, save_model=True):
         with open(filepath, 'wb') as handle:
             pickle.dump(model.mock.galaxy_table, handle,
                         protocol=pickle.HIGHEST_PROTOCOL)
+    else:
+        print('Galaxy table of this realisation not saved. Will replace with \
+              galaxy_table.pkl stored')
 
     return model
 
 
-def load_model(halocat, model):
+def load_galaxy_table(halocat, model):
 
     try:
         sim_name = halocat.SimName
     except AttributeError:
         sim_name = halocat.simname
 
+    model_name = model.model_name
     redshift = halocat.redshift
     filepath = os.path.join(save_dir, sim_name, 'z'+str(redshift),
                             '{}-z{}-{}-galaxy_table.pkl'
@@ -199,8 +227,11 @@ def load_model(halocat, model):
 
     with open(filepath, 'rb') as handle:
         gt = pickle.load(handle)
-    # this just replaces the galaxy table; everything elae is the same anyway
+    # this just replaces the galaxy table; everything elae is verified to be
+    # exact the same
     model.mock.galaxy_table = gt
+    print('Galaxy table in {} model replaced with: {}'
+          .format(model_name, filepath))
 
     return model
 
@@ -262,6 +293,7 @@ def do_subcross_count(model, n_sub):
         sim_name = model.mock.header['SimName']
         model_name = model.model_name
         L = model.mock.BoxSize
+        Lbox = model.mock.Lbox
         redshift = model.mock.redshift
         l_sub = L / n_sub  # length of subvolume box
         gt = model.mock.galaxy_table
@@ -290,18 +322,29 @@ def do_subcross_count(model, n_sub):
             D1D2 = DDsmu(0, n_threads, s_bins_counts, mu_max, n_mu_bins,
                          x1, y1, z1, periodic=True, X2=x2, Y2=y2, Z2=z2,
                          verbose=True, boxsize=L, c_api_timer=False)
-            print('Pair counting D2R1 with Corrfunc.DDsmu, {} threads...'
-                  .format(n_threads))
-            # calculate D2R, where R sample is homogeneous in volume of box
-            NR = ND1 * 3
-            # force float32 (single precision float in C) to be consistent
-            # with galaxy table precision
-            xr = np.random.uniform(0, L, NR).astype(np.float32)
-            yr = np.random.uniform(0, L, NR).astype(np.float32)
-            zr = np.random.uniform(0, L, NR).astype(np.float32)
-            D2R1 = DDsmu(0, n_threads, s_bins_counts, mu_max, n_mu_bins,
-                         xr, yr, zr, periodic=True, X2=x2, Y2=y2, Z2=z2,
-                         verbose=True, boxsize=L, c_api_timer=False)
+
+            # the time trade off is 8 minutes, with NR = 3 * ND
+            if use_analytic_DR:
+                # calculate cross-correlation DR analytically
+                # similar code can be found in halotools https://goo.gl/W9Njbv
+                R1D2, _, _ = cross_analytic_random(ND1, s_bins, mu_bins, Lbox)
+
+            else:
+                # calculate D2Rbox by brute force sampling, where
+                # Rbox sample is homogeneous in volume of box
+                print('Pair counting R1D2 with Corrfunc.DDsmu, {} threads...'
+                      .format(n_threads))
+                NR = ND1 * 3
+                # force float32 (a.k.a. single precision float in C)
+                # to be consistent with galaxy table precision
+                # otherwise corrfunc raises an error
+                xr = np.random.uniform(0, L, NR).astype(np.float32)
+                yr = np.random.uniform(0, L, NR).astype(np.float32)
+                zr = np.random.uniform(0, L, NR).astype(np.float32)
+                R1D2 = DDsmu(0, n_threads, s_bins_counts, mu_max, n_mu_bins,
+                             xr, yr, zr, periodic=True, X2=x2, Y2=y2, Z2=z2,
+                             verbose=True, boxsize=L, c_api_timer=False)
+
             # save counting results as original structured array in npy format
             filedir = os.path.join(save_dir, sim_name, 'z'+str(redshift))
             np.save(os.path.join(filedir,
@@ -309,10 +352,10 @@ def do_subcross_count(model, n_sub):
                                  .format(model_name, linind)),
                     D1D2)
             np.save(os.path.join(filedir,
-                                 '{}-cross_{}-paircount-D2R1.npy'
+                                 '{}-cross_{}-paircount-R1D2.npy'
                                  .format(model_name, linind)),
-                    D2R1)
-            print('Cross-correlation pair counts D1D2 and D2R1 saved to: {}'
+                    R1D2)
+            print('Cross-correlation pair counts D1D2 and R1D2 saved to: {}'
                   .format(filedir))
 
     else:  # use halotools, no need to do counting first, skip to xi
@@ -364,7 +407,7 @@ def do_auto_correlation(model):
                    npairs, fmt=b'%d')
         # calculate RR analytically for auto-correlation
         ND = len(model.mock.galaxy_table)
-        _, _, RR = analytic_random_counts(ND, s_bins, mu_bins, Lbox)
+        _, RR = auto_analytic_random(ND, s_bins, mu_bins, Lbox)
         xi_s_mu = ph_estimator(ND, ND, npairs, RR)
 
     else:  # use halotools, skip the counts, and calculate xi_s_mu directly
@@ -419,15 +462,15 @@ def do_subcross_correlation(model, n_sub=3):  # n defines number of subvolums
             D1D2 = np.load(os.path.join(filedir,
                                         '{}-cross_{}-paircount-D1D2.npy'
                                         .format(model_name, linind)))
-            D2R1 = np.load(os.path.join(filedir,
-                                        '{}-cross_{}-paircount-D2R1.npy'
+            R1D2 = np.load(os.path.join(filedir,
+                                        '{}-cross_{}-paircount-R1D2.npy'
                                         .format(model_name, linind)))
-            print('Re-binning {} of {} cross-correlation counts...'
-                  .format(linind+1, n_sub**3))
+            print('Re-binning {} of {} cross-correlation into ({}, {})...'
+                  .format(linind+1, n_sub**3, s_bins.size-1, mu_bins.size-1))
             # set up bins using specifications, re-bin the counts
             npairs_D1D2 = np.zeros((s_bins.size-1, mu_bins.size-1),
                                    dtype=np.int32)
-            npairs_D2R1 = np.zeros((s_bins.size-1, mu_bins.size-1),
+            npairs_R1D2 = np.zeros((s_bins.size-1, mu_bins.size-1),
                                    dtype=np.int32)
             for m, n in itertools.product(
                     range(len(s_bins)-1), range(len(mu_bins)-1)):
@@ -437,35 +480,35 @@ def do_subcross_correlation(model, n_sub=3):  # n defines number of subvolums
                     & (mu_bins[n] < D1D2['mu_max'])
                     & (D1D2['mu_max'] <= mu_bins[n+1]))
                 npairs_D1D2[m, n] = D1D2[mask_D1D2]['npairs'].sum()
-                mask_D2R1 = (
-                    (s_bins[m] < D1D2['smin'])
-                    & (D2R1['smax'] <= s_bins[m+1])
-                    & (mu_bins[n] < D2R1['mu_max'])
-                    & (D2R1['mu_max'] <= mu_bins[n+1]))
-                npairs_D2R1[m, n] = D2R1[mask_D2R1]['npairs'].sum()
+                mask_R1D2 = (
+                    (s_bins[m] < R1D2['smin'])
+                    & (R1D2['smax'] <= s_bins[m+1])
+                    & (mu_bins[n] < R1D2['mu_max'])
+                    & (R1D2['mu_max'] <= mu_bins[n+1]))
+                npairs_R1D2[m, n] = R1D2[mask_R1D2]['npairs'].sum()
 
             indices_D1D2 = np.where(npairs_D1D2 == 0)
-            indices_D2R1 = np.where(npairs_D2R1 == 0)
+            indices_R1D2 = np.where(npairs_R1D2 == 0)
             print('{} D1D2 bins are empty:'.format(len(indices_D1D2[0])))
 #            if len(indices_D1D2[0]) != 0:
 #                for i in range(len(indices_D1D2[0])):
 #                    print('({}, {})'
 #                          .format(indices_D1D2[0][i], indices_D1D2[1][i]))
-            print('{} D2R1 bins are empty:'.format(len(indices_D2R1[0])))
-#            if len(indices_D2R1[0]) != 0:
-#                for i in range(len(indices_D2R1[0])):
+            print('{} R1D2 bins are empty:'.format(len(indices_R1D2[0])))
+#            if len(indices_R1D2[0]) != 0:
+#                for i in range(len(indices_R1D2[0])):
 #                    print('({}, {})'
-#                          .format(indices_D2R1[0][i], indices_D2R1[1][i]))
+#                          .format(indices_R1D2[0][i], indices_R1D2[1][i]))
             # save re-binned pair ounts
             np.savetxt(os.path.join(filedir,
                                     '{}-cross_{}-paircount-D1D2-rebinned.txt'
                                     .format(model_name, linind)),
-                       D1D2)
+                       npairs_D1D2)
             np.savetxt(os.path.join(filedir,
-                                    '{}-cross_{}-paircount-D2R1-rebinned.txt'
+                                    '{}-cross_{}-paircount-R1D2-rebinned.txt'
                                     .format(model_name, linind)),
-                       D2R1)
-            xi_s_mu = peebles_estimator(ND1, NR, npairs_D1D2, npairs_D2R1)
+                       npairs_R1D2)
+            xi_s_mu = peebles_estimator(ND1, NR, npairs_D1D2, npairs_R1D2)
 
         else:
 
@@ -723,11 +766,11 @@ if __name__ == "__main__":
         for model_name in prebuilt_models:
             cat = make_halocat(phase)
             model0 = populate_halocat(cat, model_name=model_name,
-                                      num_cut=1, save_model=True)
-            model = load_model(cat, model0)
+                                      num_cut=1, save_model=False)
+            model = load_galaxy_table(cat, model0)
             # print(model0==model)
-            do_auto_count(model)  # do the pair counting in 1 Mpc bins
-            do_subcross_count(model, n_sub=3)
+            # do_auto_count(model)  # do the pair counting in 1 Mpc bins
+            # do_subcross_count(model, n_sub=3)
             do_auto_correlation(model)  # sum into specified bins
             do_subcross_correlation(model, n_sub=3)
 
