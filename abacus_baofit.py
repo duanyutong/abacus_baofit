@@ -29,10 +29,10 @@ prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
 halo_type = 'Rockstar'
 redshift = 0.700  # one redshift at a time instead of 'all'
 cosmology = 0  # use with only one cosmology at a time instead of 'all'
-phases = [0, 1]  # list(range(16))  # [0, 1] # list(range(16)) # 'all'
+phases = list(range(16))  # [0, 1] # list(range(16)) # 'all'
 
 # HOD models
-prebuilt_models = ['zheng07']
+prebuilt_models = ['zheng07', 'leauthaud11', 'tinker13']
 # prebuilt_models = ['zheng07', 'leauthaud11', 'tinker13', 'hearin15',
 #                   'zu_mandelbaum15', 'zu_mandelbaum16', 'cacciato09']
 step_s_bins = 5  # mpc/h
@@ -134,20 +134,20 @@ def populate_halocat(halocat, model_name, num_cut=1, save_model=True):
     if model_name == 'leauthaud11':
         model = PrebuiltHodModelFactory('leauthaud11',
                                         redshift=halocat.redshift,
-                                        threshold=10)
+                                        threshold=11)
 
     if model_name == 'tinker13':
         model = PrebuiltHodModelFactory(
                     'tinker13',
                     redshift=halocat.redshift,
-                    threshold=10,
+                    threshold=11,
                     quiescent_fraction_abscissa=[1e12, 1e13, 1e14, 1e15],
                     quiescent_fraction_ordinates=[0.25, 0.5, 0.75, 0.9])
 
     if model_name == 'hearin15':
-        model = PrebuiltHodModelFactory('zheng07',
+        model = PrebuiltHodModelFactory('hearin15',
                                         redshift=halocat.redshift,
-                                        threshold=-1)
+                                        threshold=11)
     if model_name == 'zu_mandelbaum15':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=halocat.redshift,
