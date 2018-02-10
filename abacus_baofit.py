@@ -40,7 +40,7 @@ save_dir = os.path.join('/home/dyt/analysis_data/', sim_name_prefix)
 use_corrfunc = True
 use_analytic_DR = True  # save ~5 minutes per run
 debug_mode = True
-NR_scale = 3
+NR_scale = 8
 # use_jackknife = False
 txtfmt = b'%.30e'
 
@@ -108,8 +108,11 @@ def dp_estimator(nD1, nR1, D1D2, R1D2):
 
 def make_halocat(phase):
 
-    print('--- \n Importing halo catelogue: {}{}_{:02}-{}/z{}/'
-          .format(prod_dir, sim_name_prefix, cosmology, phase, redshift))
+    print('---\n'
+          'Importing phase {} halo catelogue: {}{}_{:02}-{}/z{}/'
+          .format(phase, prod_dir, sim_name_prefix,
+                  cosmology, phase, redshift) +
+          '\n---')
 
     halocats = ht.make_catalogs(
         sim_name=sim_name_prefix, products_dir=prod_dir,
@@ -229,7 +232,7 @@ def do_auto_count(model, do_DD=True, do_RR=True):
         Lbox = model.mock.Lbox
         redshift = model.mock.redshift
         model_name = model.model_name
-        print('Pair counting auto-xi with Corrfunc.DDsmu, {} threads...'
+        print('Auto-correlation pair counting with {} threads...'
               .format(n_threads))
         x = model.mock.galaxy_table['x']
         y = model.mock.galaxy_table['y']
@@ -307,9 +310,12 @@ def do_subcross_count(model, n_sub, do_DD=True, do_DR=True):
             ND2 = len(gt_sub)  # number of galaxies in the subvolume
 
             if do_DD:
-                print('Subvolume {} of {} mask created, '
+                print('---\n'
+                      'Subvolume {} of {} mask created, '
                       '{} of {} galaxies selected'
-                      .format(linind+1, n_sub**3, len(gt_sub), len(gt)))
+                      .format(linind+1, n_sub**3, len(gt_sub), len(gt)) +
+                      '\n---'
+                      )
                 print('Actual min x, y, z of galaxy sample:',
                       np.min(gt_sub['x']),
                       np.min(gt_sub['y']),
@@ -318,7 +324,7 @@ def do_subcross_count(model, n_sub, do_DD=True, do_DR=True):
                       np.max(gt_sub['x']),
                       np.max(gt_sub['y']),
                       np.max(gt_sub['z']))
-                print('Pair counting D1D2 with Corrfunc.DDsmu, {} threads...'
+                print('Cross-correlation pair counting with {} threads...'
                       .format(n_threads))
                 # calculate D1D2, where D1 is entire box, and D2 is subvolume
                 x2, y2, z2 = gt_sub['x'], gt_sub['y'], gt_sub['z']
@@ -330,8 +336,8 @@ def do_subcross_count(model, n_sub, do_DD=True, do_DR=True):
                                      .format(model_name, linind)),
                         D1D2)
 
-            NR1 = ND1 * NR_scale
             if do_DR:
+                NR1 = ND1 * NR_scale
                 # the time trade off is ~5 minutes
                 if use_analytic_DR or debug_mode:
                     # calculate cross-correlation DR analytically
@@ -400,12 +406,21 @@ def do_auto_correlation(model):
         print('Re-binning auto-correlation counts...')
         # re-count pairs in new bins, re-bin the counts
         npairs_DD = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
+        bins_added = 0
         for m, n in itertools.product(
                 range(npairs_DD.shape[0]), range(npairs_DD.shape[1])):
+            # smin and smax fields can be equal to bin edge
+            # when they are equal, it's a bin right on the edge to be included
             mask = (
-                (s_bins[m] < DD['smin']) & (DD['smax'] <= s_bins[m+1]) &
+                (s_bins[m] <= DD['smin']) & (DD['smax'] <= s_bins[m+1]) &
                 (mu_bins[n] < DD['mu_max']) & (DD['mu_max'] <= mu_bins[n+1]))
             npairs_DD[m, n] = DD['npairs'][mask].sum()
+            bins_added = bins_added + DD['npairs'][mask].size
+        print('Total DD fine bins: {}. Total bins added: {}'
+              .format(DD.size, bins_added))
+        print('Total npairs in fine bins: {}. '
+              'Total npairs after rebinning: {}'
+              .format(DD['npairs'].sum(), npairs_DD.sum()))
         indices = np.where(npairs_DD == 0)  # check if all bins are filled
         print('{} bins are empty:'.format(len(indices[0])))
         if len(indices[0]) != 0:  # print problematic bins if any is empty
@@ -477,58 +492,75 @@ def do_subcross_correlation(model, n_sub=3):  # n defines number of subvolums
             # set up bins using specifications, re-bin the counts
             npairs_D1D2 = np.zeros((s_bins.size-1, mu_bins.size-1),
                                    dtype=np.int64)
+            bins_added = 0
             for m, n in itertools.product(
                     range(len(s_bins)-1), range(len(mu_bins)-1)):
                 mask_D1D2 = (
-                    (s_bins[m] < D1D2['smin'])
+                    (s_bins[m] <= D1D2['smin'])
                     & (D1D2['smax'] <= s_bins[m+1])
                     & (mu_bins[n] < D1D2['mu_max'])
                     & (D1D2['mu_max'] <= mu_bins[n+1]))
                 npairs_D1D2[m, n] = D1D2[mask_D1D2]['npairs'].sum()
+                bins_added = bins_added + D1D2['npairs'][mask_D1D2].size
+            print('Total D1D2 fine bins: {}. Total bins added: {}'
+                  .format(D1D2.size, bins_added))
+            print('Total npairs in fine bins: {}. '
+                  'Total npairs after rebinning: {}'
+                  .format(D1D2['npairs'].sum(), npairs_D1D2.sum()))
+            # save re-binned pair ounts
+            np.savetxt(os.path.join(filedir,
+                                    '{}-cross_{}-paircount-D1D2-rebinned.txt'
+                                    .format(model_name, linind)),
+                       npairs_D1D2, fmt=txtfmt)
 
             # read R1D2 counts and re-bin
             if use_analytic_DR:
                 npairs_R1D2 = np.loadtxt(
                     os.path.join(filedir, '{}-cross_{}-paircount-R1D2.txt'
                                  .format(model_name, linind)))
-            else:
+            if not use_analytic_DR or debug_mode:
                 R1D2 = np.load(os.path.join(filedir,
                                             '{}-cross_{}-paircount-R1D2.npy'
                                             .format(model_name, linind)))
                 npairs_R1D2 = np.zeros((s_bins.size-1, mu_bins.size-1),
                                        dtype=np.int64)
-
+                bins_added = 0
                 for m, n in itertools.product(
-                        range(len(s_bins)-1), range(len(mu_bins)-1)):
+                        range(s_bins.size-1), range(mu_bins.size-1)):
 
                     mask_R1D2 = (
-                        (s_bins[m] < R1D2['smin'])
+                        (s_bins[m] <= R1D2['smin'])
                         & (R1D2['smax'] <= s_bins[m+1])
                         & (mu_bins[n] < R1D2['mu_max'])
                         & (R1D2['mu_max'] <= mu_bins[n+1]))
                     npairs_R1D2[m, n] = R1D2[mask_R1D2]['npairs'].sum()
+                    bins_added = bins_added + R1D2['npairs'][mask_R1D2].size
 
-            indices_D1D2 = np.where(npairs_D1D2 == 0)
-            indices_R1D2 = np.where(npairs_R1D2 == 0)
-            print('{} D1D2 bins are empty:'.format(len(indices_D1D2[0])))
+                print('Total R1D2 fine bins: {}. Total bins added: {}'
+                      .format(R1D2.size, bins_added))
+                print('Total npairs in fine bins: {}. '
+                      'Total npairs after rebinning: {}'
+                      .format(R1D2['npairs'].sum(), npairs_R1D2.sum()))
+                # save re-binned pair ounts
+                np.savetxt(os.path.join(
+                        filedir,
+                        '{}-cross_{}-paircount-R1D2-rebinned.txt'
+                        .format(model_name, linind)),
+                    npairs_R1D2, fmt=txtfmt)
+
+#            indices_D1D2 = np.where(npairs_D1D2 == 0)
+#            indices_R1D2 = np.where(npairs_R1D2 == 0)
+#            print('{} D1D2 bins are empty:'.format(len(indices_D1D2[0])))
 #            if len(indices_D1D2[0]) != 0:
 #                for i in range(len(indices_D1D2[0])):
 #                    print('({}, {})'
 #                          .format(indices_D1D2[0][i], indices_D1D2[1][i]))
-            print('{} R1D2 bins are empty:'.format(len(indices_R1D2[0])))
+#            print('{} R1D2 bins are empty:'.format(len(indices_R1D2[0])))
 #            if len(indices_R1D2[0]) != 0:
 #                for i in range(len(indices_R1D2[0])):
 #                    print('({}, {})'
 #                          .format(indices_R1D2[0][i], indices_R1D2[1][i]))
-            # save re-binned pair ounts
-            np.savetxt(os.path.join(filedir,
-                                    '{}-cross_{}-paircount-D1D2-rebinned.txt'
-                                    .format(model_name, linind)),
-                       npairs_D1D2, fmt=txtfmt)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-cross_{}-paircount-R1D2-rebinned.txt'
-                                    .format(model_name, linind)),
-                       npairs_R1D2, fmt=txtfmt)
+
             # calculate cross-correlation from counts using dp estimator
             nD1 = ND1 / Lbox.prod()
             nR1 = nD1 * NR_scale
@@ -540,8 +572,11 @@ def do_subcross_correlation(model, n_sub=3):  # n defines number of subvolums
                     (l_sub * j < gt['y']) & (gt['y'] < l_sub * (j+1)) &
                     (l_sub * k < gt['z']) & (gt['z'] < l_sub * (k+1)))
             gt_sub = gt[mask]
-            print('Subvolume {} of {} mask created, {} of {} galaxies selected'
-                  .format(linind+1, n_sub**3, len(gt_sub), len(gt)))
+            print('---\n'
+                  'Subvolume {} of {} mask created, {} of {} galaxies selected'
+                  .format(linind+1, n_sub**3, len(gt_sub), len(gt)) +
+                  '\n---'
+                  )
             print('Calculating cross-xi with halotools, {} threads...'
                   .format(n_threads))
             pos1 = return_xyz_formatted_array(
@@ -789,7 +824,7 @@ if __name__ == "__main__":
         for model_name in prebuilt_models:
             cat = make_halocat(phase)
             model = populate_halocat(cat, model_name=model_name,
-                                     num_cut=5000, save_new_model=True)
+                                     num_cut=3000, save_new_model=False)
             do_auto_count(model, do_DD=True, do_RR=True)
             do_subcross_count(model, n_sub=2, do_DD=True, do_DR=True)
             do_auto_correlation(model)  # sum into specified bins
