@@ -1,0 +1,200 @@
+% mnras_template.tex 
+%
+% LaTeX template for creating an MNRAS paper
+%
+% v3.0 released 14 May 2015
+% (version numbers match those of mnras.cls)
+%
+% Copyright (C) Royal Astronomical Society 2015
+% Authors:
+% Keith T. Smith (Royal Astronomical Society)
+
+% Change log
+%
+% v3.0 May 2015
+%    Renamed to match the new package name
+%    Version number matches mnras.cls
+%    A few minor tweaks to wording
+% v1.0 September 2013
+%    Beta testing only - never publicly released
+%    First version: a simple (ish) template for creating an MNRAS paper
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Basic setup. Most papers should leave these options alone.
+\documentclass[fleqn,usenatbib]{mnras}
+
+% MNRAS is set in Times font. If you don't have this installed (most LaTeX
+% installations will be fine) or prefer the old Computer Modern fonts, comment
+% out the following line
+\usepackage{newtxtext,newtxmath}
+% Depending on your LaTeX fonts installation, you might get better results with one of these:
+%\usepackage{mathptmx}
+%\usepackage{txfonts}
+
+% Use vector fonts, so it zooms properly in on-screen viewing software
+% Don't change these lines unless you know what you are doing
+\usepackage[T1]{fontenc}
+\usepackage{ae,aecompl}
+
+
+%%%%% AUTHORS - PLACE YOUR OWN PACKAGES HERE %%%%%
+
+% Only include extra packages if you really need them. Common packages are:
+\usepackage{graphicx}	% Including figure files
+\usepackage{amsmath}	% Advanced maths commands
+\usepackage{amssymb}	% Extra maths symbols
+\usepackage{commath}
+\usepackage[alsoload=astro]{siunitx}
+\usepackage{hyperref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%% AUTHORS - PLACE YOUR OWN COMMANDS HERE %%%%%
+
+% Please keep new commands to a minimum, and use \newcommand not \def to avoid
+% overwriting existing commands. Example:
+%\newcommand{\pcm}{\,cm$^{-2}$}	% per cm-squared
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%% TITLE PAGE %%%%%%%%%%%%%%%%%%%
+
+% Title of the paper, and the short title which is used in the headers.
+% Keep the title short and informative.
+\title{Notes On Abacus BAO Analysis}
+
+% The list of authors, and the short list which is used in the headers.
+% If you need two or more lines of authors, add an extra line using \newauthor
+\author[YT. Duan et al.]{
+Yutong Duan $^{1}$\thanks{E-mail: dyt@physics.bu.edu}
+% A. N. Other,$^{2}$
+% Third Author$^{2,3}$
+% and Fourth Author$^{3}$
+\\
+% List of institutions
+% $^{1}$Royal Astronomical Society, Burlington House, Piccadilly, London W1J 0BQ, UK\\
+% $^{2}$Department, Institution, Street Address, City Postal Code, Country\\
+% $^{3}$Another Department, Different Institution, Street Address, City Postal Code, Country
+}
+
+% These dates will be filled out by the publisher
+\date{Accepted XXX. Received YYY; in original form ZZZ}
+
+% Enter the current year, for the copyright statements etc.
+\pubyear{2018}
+
+% Don't change these lines
+\begin{document}
+\label{firstpage}
+\pagerange{\pageref{firstpage}--\pageref{lastpage}}
+\maketitle
+
+% Abstract of the paper
+\begin{abstract}
+This serves as detailed notes on the procedures of BAO analysis with AbacusCosmos to accompany the code. Part 1 is on the calculation of correlation functions and covariance matrices. Part 2 is on the fitting methods of the BAO fitter.
+\end{abstract}
+
+% Select between one and six entries from the list of approved keywords.
+% Don't make up new ones.
+\begin{keywords}
+keyword1 -- keyword2 -- keyword3
+\end{keywords}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%% BODY OF PAPER %%%%%%%%%%%%%%%%%%
+
+\section{Introduction}
+
+Precision measurement of the BAO signal from galaxy correlation functions requires understanding the systematics. The standard approach is producing many mock catalogues of galaxies/quasars, test the analysis pipelines, and evaluate the sensitivity to systematics. The pipelines largely consist of two parts, statistics and fitting. The statistics of galaxy catalogues are correlation functions and covariance matrices. Then the statistics are fed to the fitting procedures, yielding best-fit $\alpha$, the BAO scale parameter with respect to the fiducial model.
+
+\section{Correlation Functions and Covariance Matrix}
+
+	\subsection{Reading Halo Catalogue}
+		
+		Given a cosmology and redshift, there are 16 boxes with different phases. For each phase, load the halo catalogue, and in the halo table, add the following columns:
+			\begin{align}
+				m_\text{halo, vir} & = m_\text{halo} \\
+				r_\text{halo, vir} & = r_\text{halo} \\
+				c_\text{NFW} & = \frac{R_\text{vir}}{r_\text{R, klypin}}
+			\end{align}
+		This is to keep the Abacus catalogues compatible with halotools, where these fields are assumed present. The NFW profile $\rho(r)$ describes dark matter density as a function of radius in the halo. NFW formula is just a very simple way of defining the halo concentration $c_\text{NFW}$, which fixes $\rho(r)$. The Klypin definition of the halo scale radius $R_\text{s}$ is considered more stable than the usual $R_\text{s}$.
+		
+	\subsection{Populating Halos with Galaxies}
+	
+		There are many Halo Occupation Distribution (HOD) models available which put synthetic galaxies in the dark matter halos. Some mainstream ones are \texttt{['zheng07', 'leauthaud11', 'tinker13', 'hearin15', 'zu\_mandelbaum15', 'zu\_mandelbaum16', 'cacciato09']}.
+		
+		There are a number of parameters that can be varied in each model. For a $(\SI{1100}{\mega\parsec/h})^3$ simulation box and \texttt{zheng07} model with magnitude threshold = -18, particle number cut = 1, and other default parameters, typical numbers are
+		\begin{align}
+			N_\text{halos} & = \num{8e6}\\
+			N_\text{galaxies} & = \num{1.5e7}.
+		\end{align}
+		For comparison, in BOSS DR12 there are \num{1.2e6} galaxies in three redshift bins, 0.38, 0.51, and 0.61.
+		
+	\subsection{Correlation Functions}
+		
+		All counting is done in fine $(s, \mu)$ bins. $s$ bin edges are from 0 to \SI{150}{\mega\parsec/h} at \SI{5}{\mega\parsec/h} steps, and $\mu=\cos\theta$ bin edges are from 0 to 1 at 0.01 steps, meaning a total of $(150, 100)$ bins. For the PH natural estimator, $DD$ and $RR$ are all we need.
+		
+		Auto-correlation $DD$ pair counts of the simulation box is saved as \texttt{paircount-DD.npy} in original Currfunc count format, a structured array. Note that \texttt{c\_api\_timer} needs to be turned off for this to be saved and recovered properly and not as ``object'' type.
+		
+		$RR$ pair counts can be calculated analytically as given in the appendix.
+		
+\section{BAO Fitter}
+
+A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/LSSanalysis} used in BOSS DR12 for the paper on BAO in correlation functions. We rewrite the fitter in a modern style in Python conforming to PEP standards. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%%%%
+
+% The best way to enter references is to use BibTeX:
+
+\bibliographystyle{mnras}
+\bibliography{abacus_baofit_notes} % if your bibtex file is called example.bib
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%% APPENDICES %%%%%%%%%%%%%%%%%%%%%
+
+\appendix
+
+
+
+\section{Auto-correlation Function Estimator}
+
+	In this implementation, raw pair counts are saved, and $N_\text{D}, N_\text{R}$ normalisation is done only at the estimator step.
+	
+	For auto-correlation of a sample in periodic box, the Peebles \& Hauser (1974) estimator (natural estimator) is
+	\begin{equation}
+		\xi = \frac{N_\mathrm{R}(N_\mathrm{R}-1)}{N_\mathrm{D}(N_\mathrm{D}-1)} \frac{DD}{RR} - 1
+	\end{equation}
+	where $DD$ is the auto-correlation data-data pair count and $RR$ is the random-random pair count.
+	
+	One way to obtain $RR$ is to generate a random sample of particle number $N_\text{R}$ in the same volume and calculate its auto-correlation pair counts. Alternatively, $RR$ can be calculated analytically as follows. Let $\dif V$ be the volume of the $(s, \mu)$ bin and $V=L_\text{box}^3$ be the volume the data sample occupies. The random sample must have the same number density as the data sample, $n_\text{R} = n_\text{D}$. For simple survey geometry, such as a cube, we may well let the random sample have the same number count, volume, and number density as the data sample.
+	\begin{equation}
+		RR(s, \mu) = \frac{N_\mathrm{R}(N_\mathrm{R}-1)}{V} \dif V(s, \mu)
+	\end{equation}
+	where $\dif V(s, \mu)$ is the volume of the $(s, \mu)$ bin.
+	
+\section{Cross-correlation Function Estimator}
+
+	For cross-correlation between a sample $D_1$ in the periodic simulation box and a subsample $D_2$ in its subvolume, the Davis \& Peebles (1983) estimator is
+	\begin{equation}
+		\xi = \frac{\bar{n}_\text{R1}}{\bar{n}_\text{D1}} \frac{D_1 D_2}{R_1 D_2} - 1
+	\end{equation}
+	where $\bar{n}_\text{D1}$ is the mean number density of data sample $D_1$, $\bar{n}_\text{R1}$ is the mean number density of $R_1$, the random sample corresponding to $D_1$, $D_1 D_2$ is the cross-correlation pair count between two data samples, and $R_1 D_2$ is the cross-correlation pair count between a random and a data sample. Usually a random sample is about 7 times the size of the corresponding data sample \citep{2008ApJ...687..919W}.
+
+	Again one may generate a random sample $R_1$ in the same volume and do the cross counting, or alternatively calculate it analytically,
+	\begin{equation}
+		R_1 D_2 = \frac{N_\text{R1} N_\text{D2}}{V_1} \dif V(s, \mu) = \bar{n}_\text{R1} N_\text{D2} \dif V(s, \mu).
+	\end{equation}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+% Don't change these lines
+\bsp	% typesetting comment
+\label{lastpage}
+\end{document}
+
+% End of mnras_template.tex
