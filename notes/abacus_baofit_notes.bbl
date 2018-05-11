@@ -17,11 +17,27 @@
   {mn@eprint@\@tempb}{\@tempb:\@tempc}{\expandafter \expandafter \csname
   mn@eprint@\@tempb\endcsname \expandafter{\@tempc}}}
 
+\bibitem[\protect\citeauthoryear{{Ross} et~al.,}{{Ross}
+  et~al.}{2017}]{boss_dr12_bao}
+{Ross} A.~J.,  et~al., 2017, \mn@doi [\mnras] {10.1093/mnras/stw2372}, \href
+  {http://adsabs.harvard.edu/abs/2017MNRAS.464.1168R} {464, 1168}
+
 \bibitem[\protect\citeauthoryear{{Wang}, {Yang}, {Mo}, {van den Bosch},
   {Weinmann}  \& {Chu}}{{Wang} et~al.}{2008}]{2008ApJ...687..919W}
 {Wang} Y.,  {Yang} X.,  {Mo} H.~J.,  {van den Bosch} F.~C.,  {Weinmann} S.~M.,
    {Chu} Y.,  2008, \mn@doi [\apj] {10.1086/591836}, \href
   {http://adsabs.harvard.edu/abs/2008ApJ...687..919W} {687, 919}
+
+\bibitem[\protect\citeauthoryear{{White} et~al.,}{{White}
+  et~al.}{2011}]{white11}
+{White} M.,  et~al., 2011, \mn@doi [\apj] {10.1088/0004-637X/728/2/126}, \href
+  {http://adsabs.harvard.edu/abs/2011ApJ...728..126W} {728, 126}
+
+\bibitem[\protect\citeauthoryear{{Zheng}, {Coil}  \& {Zehavi}}{{Zheng}
+  et~al.}{2007}]{zheng07}
+{Zheng} Z.,  {Coil} A.~L.,   {Zehavi} I.,  2007, \mn@doi [\apj]
+  {10.1086/521074}, \href {http://adsabs.harvard.edu/abs/2007ApJ...667..760Z}
+  {667, 760}
 
 \makeatother
 \end{thebibliography}

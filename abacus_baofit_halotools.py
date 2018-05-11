@@ -7,43 +7,45 @@ Created on Wed Oct 25 17:30:51 2017
 """
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
+import numpy as np
 import os
+from glob import glob
 import itertools
 from multiprocessing import Pool
-import numpy as np
-from glob import glob
-import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+import pickle
 from halotools.mock_observables import tpcf_multipole
 from halotools.mock_observables.two_point_clustering.s_mu_tpcf import (
         spherical_sector_volume)
-
+from halotools.empirical_models import PrebuiltHodModelFactory
 from halotools.utils import add_halo_hostid
+import Halotools as ht  # Abacus' "Halotools" for importing Abacus catalogues
 from Corrfunc.theory.DDsmu import DDsmu
-from hod import initialise_model, populate_model
 
-# %% custom settings
+# %% catalogue parameters
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'test'
-cosmology = 0  # one cosmology at a time instead of 'all'
-phases = [0]  # range(16)  # [0, 1] # list(range(16))
+save_dir = os.path.join('/home/dyt/analysis_data/', sim_name_prefix+'-mgrav')
 redshift = 0.7  # one redshift at a time instead of 'all'
-model_names = ['zheng07', 'gen1']
-N_sub = 3  # number of subvolumes per dimension
-N_cut = 70  # number particle cut, 100 corresponds to 1e12 Msun
-N_reals = 10  # indices for realisations for an HOD, list of integers
-N_threads = 10
-
-# %% flags
-debug_mode = False
-save_hod_realisation = True
-use_analytic_randoms = True
-use_jackknife = True
-use_rsd = True
-use_subhalos = False
-
-# %% bin settings
+cosmology = 0  # use with only one cosmology at a time instead of 'all'
+phases = [0]  # range(16)  # [0, 1] # list(range(16))
+n_sub = 3
+n_cut = 100  # number particle cut, 100 corresponds to 1e12 Msun
+n_reals = 1  # indices for realisations for an HOD, list of integers
+prebuilt_models = ['zheng07']
+# prebuilt_models = ['zheng07', 'cacciato09', 'leauthaud11', 'tinker13']
+# prebuilt_models = ['zheng07', 'leauthaud11', 'tinker13', 'hearin15',
+#                   'zu_mandelbaum15', 'zu_mandelbaum16', 'cacciato09']
+prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
+halo_type = 'Rockstar'
+halo_m_prop = 'halo_mgrav'
+n_threads = 10
 step_s_bins = 5  # mpc/h, bins for fitting
 step_mu_bins = 0.05  # bins for fitting
+use_analytic_randoms = True
+debug_mode = False
+# use_jackknife = False
+txtfmt = b'%.30e'
+
+# %% set up bins using given parameters
 s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)  # for fitting
 s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
 mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)  # for fitting
@@ -51,15 +53,9 @@ s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0  # for counting
 n_mu_bins = 100  # for couting, mu bin size 0.01
 
-# %% fixed catalogue parameters
-prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
-save_dir = os.path.join('/home/dyt/analysis_data/', sim_name_prefix+'-'+tagout)
-halo_type = 'Rockstar'
-halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
-txtfmt = b'%.30e'
-
 
 # %% definitionss of statisical formulae
+
 def auto_analytic_random(ND, s_bins, mu_bins, V):
     '''
     DD and RR for auto-correlations
@@ -180,7 +176,7 @@ def make_halocat(phase):
             .format(prod_dir, sim_name_prefix, cosmology, phase, redshift)
           + '\n---')
 
-    halocats = abacus_ht.make_catalogs(
+    halocats = ht.make_catalogs(
         sim_name=sim_name_prefix, products_dir=prod_dir,
         redshifts=[redshift], cosmologies=[cosmology], phases=[phase],
         halo_type=halo_type,
@@ -209,6 +205,144 @@ def make_halocat(phase):
     return halocat
 
 
+def initialise_model(redshift, model_name='zheng07'):
+
+    print('Initialising HOD model: {}...'.format(model_name))
+
+    # Default is ‘halo_mvir’
+    if model_name == 'zheng07':
+        model = PrebuiltHodModelFactory('zheng07',
+                                        redshift=redshift,
+                                        threshold=-18,
+                                        prim_haloprop_key=halo_m_prop)
+        model.param_dict['logMmin'] = 13.3
+        model.param_dict['sigma_logM'] = 0.8
+        model.param_dict['alpha'] = 1
+        model.param_dict['logM0'] = 13.3
+        model.param_dict['logM1'] = 13.8
+
+    elif model_name == 'leauthaud11':
+        model = PrebuiltHodModelFactory('leauthaud11',
+                                        redshift=redshift,
+                                        threshold=11,
+                                        prim_haloprop_key=halo_m_prop)
+        model.param_dict['smhm_m0_0'] = 11.5  # 10.72
+        model.param_dict['smhm_m0_a'] = 0.59
+        model.param_dict['smhm_m1_0'] = 13.4  # 12.35
+        model.param_dict['smhm_m1_a'] = 0.3
+        model.param_dict['smhm_beta_0'] = 2  # 0.43
+        model.param_dict['smhm_beta_a'] = 0.18
+        model.param_dict['smhm_delta_0'] = 0.1  # 0.56
+        model.param_dict['smhm_delta_a'] = 0.18
+        model.param_dict['smhm_gamma_0'] = 1  # 1.54
+        model.param_dict['smhm_gamma_a'] = 2.52
+        model.param_dict['scatter_model_param1'] = 0.2
+        model.param_dict['alphasat'] = 1
+        model.param_dict['betasat'] = 1.1  # 0.859
+        model.param_dict['bsat'] = 11  # 10.62
+        model.param_dict['betacut'] = 6  # -0.13
+        model.param_dict['bcut'] = 0.01  # 1.47
+
+    elif model_name == 'tinker13':
+        model = PrebuiltHodModelFactory(
+                    'tinker13',
+                    redshift=redshift,
+                    threshold=11,
+                    prim_haloprop_key=halo_m_prop,
+                    quiescent_fraction_abscissa=[1e12, 1e13, 1e14, 1e15],
+                    quiescent_fraction_ordinates=[0.25, 0.5, 0.75, 0.9])
+
+        model.param_dict['smhm_m0_0_active'] = 11
+        model.param_dict['smhm_m0_0_quiescent'] = 10.8
+        model.param_dict['smhm_m1_0_active'] = 12.2
+        model.param_dict['smhm_m1_0_quiescent'] = 11.8
+        model.param_dict['smhm_beta_0_active'] = 0.44
+        model.param_dict['smhm_beta_0_quiescent'] = 0.32
+        # model.param_dict['alphasat_active'] = 1
+        # model.param_dict['alphasat_quiescent'] = 1
+        # model.param_dict['betacut_active'] = 0.77
+        # model.param_dict['betacut_quiescent'] = -0.12
+        # model.param_dict['bcut_active'] = 0.2
+        # model.param_dict['bcut_quiescent'] = 0.2
+        # model.param_dict['betasat_active'] = 1.5
+        # model.param_dict['betasat_quiescent'] = 0.62
+        model.param_dict['bsat_active'] = 13
+        model.param_dict['bsat_quiescent'] = 8
+
+    elif model_name == 'hearin15':
+        model = PrebuiltHodModelFactory('hearin15',
+                                        redshift=redshift,
+                                        threshold=11)
+    elif model_name == 'zu_mandelbaum15':
+        model = PrebuiltHodModelFactory('zheng07',
+                                        redshift=redshift,
+                                        threshold=-1)
+    elif model_name == 'zu_mandelbaum16':
+        model = PrebuiltHodModelFactory('zheng07',
+                                        redshift=redshift,
+                                        threshold=-1)
+    elif model_name == 'cacciato09':
+        model = PrebuiltHodModelFactory('cacciato09',
+                                        redshift=redshift,
+                                        threshold=10,
+                                        prim_haloprop_key=halo_m_prop)
+
+        model.param_dict['log_L_0'] = 9.935
+        model.param_dict['log_M_1'] = 12.9  # 11.07
+        model.param_dict['gamma_1'] = 0.3  # 3.273
+        model.param_dict['gamma_2'] = 0.255
+        model.param_dict['sigma'] = 0.143
+        model.param_dict['a_1'] = 0.501
+        model.param_dict['a_2'] = 2.106
+        model.param_dict['log_M_2'] = 14.28
+        model.param_dict['b_0'] = -0.5  # -0.766
+        model.param_dict['b_1'] = 1.008
+        model.param_dict['b_2'] = -0.094
+        model.param_dict['delta_1'] = 0
+        model.param_dict['delta_2'] = 0
+
+    # add useful model properties here
+    model.model_name = model_name  # add model_name field
+
+    return model
+
+
+def populate_halocat(halocat, model, n_cut=100,
+                     reuse_old_model=False, save_new_model=True):
+
+    '''
+    if save_new_model is True:
+        the current monte carlo realisation is saved and used
+    '''
+
+    print('Populating {} halos with n_cut = {}...'
+          .format(len(halocat.halo_table), n_cut))
+    if hasattr(model, 'mock'):
+        model.mock.populate()
+    else:
+        model.populate_mock(halocat, Num_ptcl_requirement=n_cut)
+    print('Mock catalogue populated with {} galaxies'
+          .format(len(model.mock.galaxy_table)))
+
+    if save_new_model:
+        # save this particular monte carlo realisation of the model
+        # dumping model instance yields error; dump galaxy table only
+        sim_name = model.mock.header['SimName']
+        filedir = os.path.join(save_dir, sim_name,
+                               'z{}-r{}'.format(redshift, model.r))
+        if not os.path.exists(filedir):
+            os.makedirs(filedir)
+        filepath = os.path.join(filedir,
+                                '{}-galaxy_table.pkl'.format(model.model_name))
+        print('Pickle dumping galaxy table...')
+        with open(filepath, 'wb') as handle:
+            pickle.dump(model.mock.galaxy_table, handle,
+                        protocol=pickle.HIGHEST_PROTOCOL)
+        print('Galaxy table saved to: {}'.format(filepath))
+
+    return model
+
+
 def do_auto_count(model, do_DD=True, do_RR=True):
     # do the pair counting in 1 Mpc bins
 
@@ -218,7 +352,7 @@ def do_auto_count(model, do_DD=True, do_RR=True):
     redshift = model.mock.redshift
     model_name = model.model_name
     print('Auto-correlation pair counting for entire volume with {} threads...'
-          .format(N_threads))
+          .format(n_threads))
     x = model.mock.galaxy_table['x']
     y = model.mock.galaxy_table['y']
     z = model.mock.galaxy_table['z']
@@ -231,7 +365,7 @@ def do_auto_count(model, do_DD=True, do_RR=True):
     # otherwise, with c_api_timer enabled, file is in "object" format,
     # not proper datatypes, and will cause indexing issues
     if do_DD:
-        DD = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins, x, y, z,
+        DD = DDsmu(1, n_threads, s_bins_counts, mu_max, n_mu_bins, x, y, z,
                    periodic=True, verbose=False, boxsize=L,
                    c_api_timer=False)
         # save counting results as original structured array in npy format
@@ -255,7 +389,7 @@ def do_auto_count(model, do_DD=True, do_RR=True):
         xr = np.random.uniform(0, L, NR)
         yr = np.random.uniform(0, L, NR)
         zr = np.random.uniform(0, L, NR)
-        RR = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
+        RR = DDsmu(1, n_threads, s_bins_counts, mu_max, n_mu_bins,
                    xr, yr, zr, periodic=True, verbose=False,
                    boxsize=L, c_api_timer=False)
         np.save(os.path.join(filedir, '{}-auto-paircount-RR.npy'
@@ -263,33 +397,33 @@ def do_auto_count(model, do_DD=True, do_RR=True):
                 RR)
 
 
-def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
+def do_subcross_count(model, n_sub, do_DD=True, do_DR=True):
 
     sim_name = model.mock.header['SimName']
     model_name = model.model_name
     L = model.mock.BoxSize
     Lbox = model.mock.Lbox
     redshift = model.mock.redshift
-    l_sub = L / N_sub  # length of subvolume box
-    gtab = model.mock.galaxy_table
-    x1, y1, z1 = gtab['x'], gtab['y'], gtab['z']
-    ND1 = len(gtab)  # number of galaxies in entire volume of periodic box
+    l_sub = L / n_sub  # length of subvolume box
+    gt = model.mock.galaxy_table
+    x1, y1, z1 = gt['x'], gt['y'], gt['z']
+    ND1 = len(gt)  # number of galaxies in entire volume of periodic box
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
 
-    for i, j, k in itertools.product(range(N_sub), repeat=3):
+    for i, j, k in itertools.product(range(n_sub), repeat=3):
 
-        linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        mask = ((l_sub * i < gtab['x']) & (gtab['x'] <= l_sub * (i+1)) &
-                (l_sub * j < gtab['y']) & (gtab['y'] <= l_sub * (j+1)) &
-                (l_sub * k < gtab['z']) & (gtab['z'] <= l_sub * (k+1)))
-        gt_sub = gtab[mask]  # select a subvolume of the galaxy table
+        linind = i*n_sub**2 + j*n_sub + k  # linearised index of subvolumes
+        mask = ((l_sub * i < gt['x']) & (gt['x'] <= l_sub * (i+1)) &
+                (l_sub * j < gt['y']) & (gt['y'] <= l_sub * (j+1)) &
+                (l_sub * k < gt['z']) & (gt['z'] <= l_sub * (k+1)))
+        gt_sub = gt[mask]  # select a subvolume of the galaxy table
         ND2 = len(gt_sub)  # number of galaxies in the subvolume
 
         if do_DD:
             # print('Subvolume {} of {} mask created, '
             #       '{} of {} galaxies selected'
-            #       .format(linind+1, np.power(N_sub, 3),
+            #       .format(linind+1, np.power(n_sub, 3),
             #               len(gt_sub), len(gt)))
             # print('Actual min/max x, y, z of galaxy sample:'
             #       '({:3.2f}, {:3.2f}, {:3.2f}),'
@@ -301,10 +435,10 @@ def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
             #               np.max(gt_sub['y']),
             #               np.max(gt_sub['z'])))
             # print('Cross-correlation pair counting for subvolume'
-            #       + 'with {} threads...'.format(N_threads))
+            #       + 'with {} threads...'.format(n_threads))
             # calculate D1D2, where D1 is entire box, and D2 is subvolume
             x2, y2, z2 = gt_sub['x'], gt_sub['y'], gt_sub['z']
-            D1D2 = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+            D1D2 = DDsmu(0, n_threads, s_bins_counts, mu_max, n_mu_bins,
                          x1, y1, z1, periodic=True, X2=x2, Y2=y2, Z2=z2,
                          verbose=False, boxsize=L, c_api_timer=False)
             np.save(os.path.join(filedir,
@@ -331,14 +465,14 @@ def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
                 # Rbox sample is homogeneous in volume of box
                 print('Pair counting R1D2 with Corrfunc.DDsmu, '
                       '{} threads...'
-                      .format(N_threads))
+                      .format(n_threads))
                 # force float32 (a.k.a. single precision float in C)
                 # to be consistent with galaxy table precision
                 # otherwise corrfunc raises an error
                 xr = np.random.uniform(0, L, NR1).astype(np.float32)
                 yr = np.random.uniform(0, L, NR1).astype(np.float32)
                 zr = np.random.uniform(0, L, NR1).astype(np.float32)
-                R1D2 = DDsmu(0, N_threads,
+                R1D2 = DDsmu(0, n_threads,
                              s_bins_counts, mu_max, n_mu_bins,
                              xr, yr, zr, periodic=True,
                              X2=x2, Y2=y2, Z2=z2,
@@ -418,10 +552,10 @@ def do_auto_correlation(model):
     return xi_s_mu, xi_0_txt, xi_2_txt
 
 
-def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
+def do_subcross_correlation(model, n_sub=3):  # n defines number of subvolums
     '''
-    cross-correlation between 1/N_sub^3 of a box to the whole box
-    N_sub^3 * 16 results are used for emperically estimating covariance matrix
+    cross-correlation between 1/n_sub^3 of a box to the whole box
+    n_sub^3 * 16 results are used for emperically estimating covariance matrix
     '''
     # setting halocat properties to be compatibble with halotools
     sim_name = model.mock.header['SimName']
@@ -436,15 +570,15 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
 
-    for i, j, k in itertools.product(range(N_sub), repeat=3):
-        linind = i*N_sub**2 + j*N_sub + k  # linearised index
+    for i, j, k in itertools.product(range(n_sub), repeat=3):
+        linind = i*n_sub**2 + j*n_sub + k  # linearised index
 
         # read in pair counts file which has fine bins
         D1D2 = np.load(os.path.join(filedir,
                                     '{}-cross_{}-paircount-D1D2.npy'
                                     .format(model_name, linind)))
         # print('Re-binning {} of {} cross-correlation into ({}, {})...'
-        #       .format(linind+1, N_sub**3, s_bins.size-1, mu_bins.size-1))
+        #       .format(linind+1, n_sub**3, s_bins.size-1, mu_bins.size-1))
         # set up bins using specifications, re-bin the counts
         npairs_D1D2 = rebin(D1D2)
         # save re-binned pair ounts
@@ -476,7 +610,7 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
         xi_s_mu = dp_estimator(nD1, nR1, npairs_D1D2, npairs_R1D2)
 
         # print('Calculating cross-correlation for subvolume {} of {}...'
-        #       .format(linind+1, np.power(N_sub, 3)))
+        #       .format(linind+1, np.power(n_sub, 3)))
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         xi_0_txt = np.vstack([s_bins_centre, xi_0]).transpose()
@@ -546,47 +680,44 @@ def do_coadd_phases(model_name, coadd_phases=range(16)):
             filedir, '{}-auto-xi_2-coadd_err.txt'.format(model_name)),
         xi_2_err, fmt=txtfmt)
 
-    if use_jackknife:
-        for phase in coadd_phases:
-            # print('Jackknife coadding xi, dropping phase {}...'
-            # .format(phase))
-            xi_list = xi_list_phases[:phase] + xi_list_phases[phase+1:]
-            xi_0_list = xi_0_list_phases[:phase] + xi_0_list_phases[phase+1:]
-            xi_2_list = xi_2_list_phases[:phase] + xi_2_list_phases[phase+1:]
-            # print('For phase {}, # phases selected: {}, {}, {}'
-            #      .format(phase, len(xi_list),
-            #              len(xi_0_list), len(xi_2_list)))
-            xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err = \
-                coadd_xi_list(xi_list, xi_0_list, xi_2_list)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_s_mu-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_s_mu_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_s_mu-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_s_mu_err, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_0-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_0_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_0-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_0_err, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_2-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_2_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_2-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_2_err, fmt=txtfmt)
+    for phase in coadd_phases:
+        # print('Jackknife coadding xi, dropping phase {}...'.format(phase))
+        xi_list = xi_list_phases[:phase] + xi_list_phases[phase+1:]
+        xi_0_list = xi_0_list_phases[:phase] + xi_0_list_phases[phase+1:]
+        xi_2_list = xi_2_list_phases[:phase] + xi_2_list_phases[phase+1:]
+        # print('For phase {}, # phases selected: {}, {}, {}'
+        #      .format(phase, len(xi_list), len(xi_0_list), len(xi_2_list)))
+        xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err = \
+            coadd_xi_list(xi_list, xi_0_list, xi_2_list)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_s_mu-coadd_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_s_mu_ca, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_s_mu-coadd_err_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_s_mu_err, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_0-coadd_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_0_ca, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_0-coadd_err_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_0_err, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_2-coadd_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_2_ca, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-xi_2-coadd_err_jackknife_{}.txt'
+                .format(model_name, phase)),
+            xi_2_err, fmt=txtfmt)
 
 
-def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
+def do_cov(model_name, n_sub=3, cov_phases=list(range(16))):
 
-    # calculate cov combining all phases, 16 * N_sub^3 * N_reals
+    # calculate cov combining all phases, 16 * n_sub^3 * n_reals
     for ell in [0, 2]:
         paths = []
         for phase in cov_phases:
@@ -599,7 +730,7 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
               .format(len(paths), ell))
         # read in all xi files for all phases
         xi_list = [np.loadtxt(path)[:, 1] for path in paths]
-        cov = xi1d_list_to_cov(xi_list) / np.power(N_sub, 3)/15/N_reals
+        cov = xi1d_list_to_cov(xi_list) / np.power(n_sub, 3)/15/n_reals
         # save cov
         filepath = os.path.join(  # save to '-combined' folder for all phases
                 save_dir,
@@ -627,7 +758,7 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
             xi_0 = np.loadtxt(path0)[:, 1]
             xi_2 = np.loadtxt(path2)[:, 1]
             xi_list.append(np.hstack((xi_0, xi_2)))
-    cov_monoquad = xi1d_list_to_cov(xi_list) / np.power(N_sub, 3)/15/N_reals
+    cov_monoquad = xi1d_list_to_cov(xi_list) / np.power(n_sub, 3)/15/n_reals
     # save cov
     filepath = os.path.join(  # save to '-combined' folder for all phases
             save_dir,
@@ -638,54 +769,51 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
     print('Monoquad covariance matrix saved to: ', filepath)
 
 
-def do_realisations(halocat, model_name, N_reals=16):
+def do_realisations(halocat, model_name, n_reals=5):
     '''
     generates n HOD realisations for a given (phase, model)
     then co-add them and get a single set of xi data
     the rest of the programme will work as if there is only 1 realisation
     '''
 
-    model = initialise_model(halocat, model_name=model_name,
-                             halo_m_prop=halo_m_prop)
-    sim_name = halocat.SimName
+    model = initialise_model(halocat.redshift, model_name=model_name)
     # create n_real realisations of the given HOD model
     xi_list_reals = []
     xi_0_list_reals = []
     xi_2_list_reals = []
-    for r in range(N_reals):
+    for r in range(n_reals):
         # add useful model properties here
         model.r = r
         # check if current realisation, r, exists;
         filepath = os.path.join(
-                save_dir, sim_name, 'z{}-r{}'.format(redshift, r),
-                '{}-galaxy_table.csv'.format(model_name))
+                save_dir,
+                sim_name_prefix + '_' + str(cosmology).zfill(2),
+                'z{}-r{}'.format(redshift, r),
+                '{}-galaxy_table.pkl'.format(model_name))
         if os.path.isfile(filepath):
             print('---\n'
-                  '{} of {} realisations for model {} exists. \n'
-                  '---'
-                  .format(r+1, N_reals, model_name))
+                  + '{} of {} realisations for model {} exists.'
+                  + '\n---'
+                  .format(r+1, n_reals, model_name))
         else:
             print(filepath, 'does not exist')
             print('---\n'
-                  'Generating {} of {} realisations for model {} ...\n'
-                  '---'
-                  .format(r+1, N_reals, model_name))
-            model = populate_model(halocat, model, N_cut=N_cut,
-                                   use_rsd=use_rsd, use_subhalos=use_subhalos)
-            # save galaxy table
-            if save_hod_realisation:
-                model.mock.galaxy_table.write(filepath, format='ascii.ecsv')
+                  + 'Generating {} of {} realisations for model {}...'
+                  .format(r+1, n_reals, model_name)
+                  + '\n---')
+            model = populate_halocat(halocat, model,
+                                     n_cut=n_cut, save_new_model=True)
             do_auto_count(model, do_DD=True, do_RR=True)
-            do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
+            do_subcross_count(model, n_sub=n_sub, do_DD=True, do_DR=True)
         # always rebin counts and calculate xi in case bins change
         xi_s_mu, xi_0, xi_2 = do_auto_correlation(model)
-        do_subcross_correlation(model, N_sub=N_sub)
+        do_subcross_correlation(model, n_sub=n_sub)
         # collect auto-xi to coadd all realisations for the current phase
         xi_list_reals.append(xi_s_mu)
         xi_0_list_reals.append(xi_0)
         xi_2_list_reals.append(xi_2)
 
-    print('Co-adding auto-correlation for {} realisations...'.format(N_reals))
+    print('Co-adding auto-correlation for {} realisations...'.format(n_reals))
     xi_s_mu_ca, _, xi_0_ca, _, xi_2_ca, _ = \
         coadd_xi_list(xi_list_reals, xi_0_list_reals, xi_2_list_reals)
     filedir = os.path.join(save_dir, halocat.SimName, 'z{}'.format(redshift))
@@ -711,7 +839,7 @@ def run_baofit():
             sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
             'z{}'.format(redshift))
     list_of_inputs = []
-    for model_name in model_names:
+    for model_name in prebuilt_models:
         for phase in phases:  # construct list of inputs for parallelisation
             path_xi_0 = os.path.join(filedir,
                                      '{}-auto-xi_0-coadd_jackknife_{}.txt'
@@ -723,7 +851,7 @@ def run_baofit():
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    pool = Pool(N_threads)
+    pool = Pool(n_threads)
     pool.map(baofit, list_of_inputs)
 
 
@@ -731,11 +859,11 @@ if __name__ == "__main__":
 
     for phase in phases:
         cat = make_halocat(phase)
-        for model_name in model_names:
-            do_realisations(cat, model_name, N_reals=N_reals)
+        for model_name in prebuilt_models:
+            do_realisations(cat, model_name, n_reals=n_reals)
 
-    for model_name in model_names:
+    for model_name in prebuilt_models:
         do_coadd_phases(model_name, coadd_phases=phases)
-        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+        do_cov(model_name, n_sub=n_sub, cov_phases=phases)
 
     run_baofit()

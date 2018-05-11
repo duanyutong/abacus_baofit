@@ -1,29 +1,22 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Jan 12 21:21:33 2018
-
-@author: Ashley J Ross, modified by Duan Yutong (dyt@physics.bu.edu)
-"""
-
-from __future__ import (  # python 3 support
-        absolute_import, division, print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
 import os
 import numpy as np
 from scipy.optimize import minimize
 import pickle
+import sys
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
-rmin = 50.
-rmax = 150.  # the minimum and maximum scales to be used in the fit
-rbmax = 80.  # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/analysis_data/dr12/' # this is the save directory; must contain "2Dbaofits" folder
-datadir = '/home/dyt/LSSanalysis/Ross_2016_COMBINEDDR12/' # where the data are
-ft = 'Ross_2016_COMBINEDDR12_' # common prefix of all data files cinlduing last '_'
-zb = 'zbin3_' # change number to change zbin
-binc = 0 # change number to change bin center
+rmin = 50
+rmax = 150 # the minimum and maximum scales to be used in the fit
+rbmax = 80 # the maximum scale to be used to set the bias prior
+Hdir = '/home/dyt/analysis_data/emulator_1100box_planck-mgrav/' # this is the save directory; must contain "2Dbaofits" folder
+# datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
+# ft = 'zheng07' # common prefix of all data files cinlduing last '_'
+zb = '' # zb = 'zbin3_' # change number to change zbin
+binc = '' # binc = 0 # change number to change bin center
 bs = 5. # the r bin size of the data
-bc = 'post_recon_bincent'+str(binc)+'.dat' # common ending string of data files
-fout = ft+zb+bc
+bc = '.txt' # bc = 'post_recon_bincent'+str(binc)+'.dat' # common ending string of data files
+# fout = ft
 
 def P2(mu):
     return 0.5*(3.*mu**2.-1.)
@@ -44,9 +37,9 @@ class baofit3D_ellFull_1cov:
         m2 = 1.
         self.nbin = len(self.rl)
         
-        print('nbin is: ', self.nbin)
-        print('xim is: ', self.xim)
-        print('r list is: ', self.rl)
+        # print('nbin is: ', self.nbin)
+        # print('xim is: ', self.xim)
+        # print('r list is: ', self.rl)
         self.invt = ic
         if self.nbin != len(self.invt):
             return 'vector matrix mismatch!'
@@ -247,7 +240,7 @@ class baofit3D_ellFull_1cov:
             return 1000
         modl = []
         if wo == 'y':
-            fo = open('ximod'+fw+'.dat','w')
+            fo = open(Hdir+'2Dbaofits/'+fw+'-ep0-ximod.dat','w')
         pv = []
         for i in range(0, int(self.nbin/2)):
             pv.append(self.xim[i]-BB*self.xia[i])
@@ -418,9 +411,10 @@ def sigreg_2dme(file, spar=0.006, spat=0.003, amin=0.8, amax=1.2):
 
 def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
                     B0=1., spar=0.006, spat=0.003, 
-                    mina=.8,maxa=1.2,nobao='n',Bp=.4,Bt=.4,meth='Powell'):
+                    amin=0.8,amax=1.2,nobao='n',Bp=.4,Bt=.4,meth='Nelder-Mead',
+                    fout=''):
 
-    print('try meth = "Nelder-Mead" if does not work or answer is weird')
+    # print('try meth = "Nelder-Mead" if does not work or answer is weird')
     bb = baofit3D_ellFull_1cov(dvb,icovb,mod,rlb) #initialize for bias prior
     b = baofit3D_ellFull_1cov(dv,icov,mod,rl) #initialize for fitting
     b.B0 = B0
@@ -433,32 +427,39 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     bb.mkxi()
     b.bins = bs
     
-    B = .1
-    chiBmin = 1000
+    B = 0.1
+    BB = None
+    chiBmin = 2000
     while B < 2.:
         chiB = bb.chi_templ_alphfXX((B,0,0,0,1.,0,0,0))
         if chiB < chiBmin:
             chiBmin = chiB
             BB = B
         B += .01
-    print('BB, chiBmin:', BB,chiBmin)
+    if BB == None:
+        print('ChiB >= ChiBmin for B in [0.1, 2)')
+    
+#    print('BB, chiBmin:', BB,chiBmin)
     b.BB = BB
     b.B0 = BB       
     b.Bp= Bp
     b.Bt = Bt
-    fo = open(Hdir+'2Dbaofits/arat'+fout+'1covchi.dat','w+')
-    fg = open(Hdir+'2Dbaofits/arat'+fout+'1covchigrid.dat','w+')
+    if not os.path.exists(os.path.join(Hdir+'2Dbaofits')):
+        print('2Dbaofits DNE. Creating folder')
+        os.makedirs(os.path.join(Hdir+'2Dbaofits'))
+    fo = open(Hdir+'2Dbaofits/'+fout+'-arat-covchi.dat','w+')
+    fg = open(Hdir+'2Dbaofits/'+fout+'-arat-covchigrid.dat','w+')
     chim = 1000
-    nar = int((maxa-mina)/spar)
-    nat = int((maxa-mina)/spat)
+    nar = int((amax-amin)/spar)
+    nat = int((amax-amin)/spat)
     grid = np.zeros((nar,nat))
     fac = (998.-float(len(dv)))/999.
 
     for i in range(nar):      
-        b.ar = mina+spar*i+spar/2.
-        print('b.ar: ', b.ar)
+        b.ar = amin+spar*i+spar/2.
+#        print('b.ar: ', b.ar)
         for j in range(nat):
-            b.at = mina+spat*j+spat/2.
+            b.at = amin+spat*j+spat/2.
             b.mkxi()
             inl = (B,B0)
             (B, B0) = minimize(b.chi_templ_alphfXX_an, inl, 
@@ -468,7 +469,7 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
             fo.write(str(b.ar)+' '+str(b.at)+' '+str(chi)+'\n')
             fg.write(str(chi)+' ')
             if chi < chim:
-                print('alpha_r, alpha_t, chisq: ', b.ar,b.at,chi)
+#                print('alpha_r, alpha_t, chisq: ', b.ar,b.at,chi)
                 chim = chi
                 alrm = b.ar
                 altm = b.at
@@ -480,58 +481,71 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     b.mkxi()
     b.mkxism()
     chi = b.chi_templ_alphfXX_an((Bm,Betam),wo='y',fw=fout) # writes out best-fit model
-    print('alpha_r, alpha_t, chisq at minimum: ', alrm,altm,chim) # alphlk,likm
+#    print('alpha_r, alpha_t, chisq at minimum: ', alrm,altm,chim) # alphlk,likm
     alph = (alrm*altm**2.)**(1/3.)
     b.ar = alph
     b.at = alph 
     b.mkxi()
     b.mkxism()
-    chi = b.chi_templ_alphfXX_an((Bm,Betam),wo='y',fw=fout+'ep0')
+    chi = b.chi_templ_alphfXX_an((Bm,Betam),wo='y',fw=fout)
     fo.close()
     fg.close()
-    ans = sigreg_2dme(Hdir+'2Dbaofits/arat'+fout+'1covchi',spar=spar,spat=spat)
-    return ans
+#    ans = sigreg_2dme(Hdir+'2Dbaofits/arat-'+fout+'-covchi',spar=spar,spat=spat)
+    return alrm, altm, chim
+
+
+def baofit(inputs):
+# def baofit():
+
+    path_xi_0, path_xi_2, path_cov, fout_tag = inputs
+    # read in data
+    # c = np.loadtxt(datadir+ft+zb+'cross-xi_monoquad-cov'+bc)  # combined monopole, quadrupole cov matrix
+    # r_bins_centre = np.loadtxt(datadir+ft+zb+'auto-xi_0-coadd'+bc)[:, 0]
+    # d0 = np.loadtxt(datadir+ft+zb+'auto-xi_0-coadd'+bc)[:, 1]
+    # d2 = np.loadtxt(datadir+ft+zb+'auto-xi_2-coadd'+bc)[:, 1]
+
+    c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
+    r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
+    d0 = np.loadtxt(path_xi_0)[:, 1]
+    d2 = np.loadtxt(path_xi_2)[:, 1]
+
+    if len(c) != len(d0)*2: print('MISMATCHED data and cov matrix!')
+    if len(d0) != len(d2): print('0 and 2 components of xi mismatch')
+    # create data vectors in given range
+    r_mask = (rmin < r_bins_centre) & (r_bins_centre < rmax)
+    rl = np.hstack([r_bins_centre[r_mask], r_bins_centre[r_mask]]) * 1.000396 #factor to correct for pairs should have slightly larger average pair distance than the bin center
+    dv = np.hstack([d0[r_mask], d2[r_mask]])
+    # dv_len = int(dv.size/2) # length of selected data vector for ell = 0 and 2
+    rb_mask = r_mask & (r_bins_centre < rbmax)
+    rlb = np.hstack([r_bins_centre[rb_mask], r_bins_centre[rb_mask]]) * 1.000396
+    dvb = np.hstack([d0[rb_mask], d2[rb_mask]])
+    # dvb_len = int(dvb.size/2)
+    print('{} - length of data vector (0 and 2 components): {}'.format(fout_tag, len(dv)))
+    # create cov matrix for data, must keep the cov between mono and quadrupole
+    ri_mask = np.tile(r_mask, (len(r_mask), 1)).transpose()
+    rj_mask = np.tile(r_mask, (len(r_mask), 1))
+    quadrant_mask = ri_mask & rj_mask
+    covm_mask = np.tile(quadrant_mask, (2,2))
+    covm = c[covm_mask].reshape(dv.size, dv.size)
+    invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
+    # covm for bias
+    rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()
+    rbj_mask = np.tile(rb_mask, (len(rb_mask), 1))
+    quadrant_mask = rbi_mask & rbj_mask
+    covmb_mask = np.tile(quadrant_mask, (2,2))
+    covmb = c[covmb_mask].reshape(dvb.size, dvb.size)
+    invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
+    invcb = np.linalg.pinv(covmb)
+    # define template
+    mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used     
+    alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, amin=1.005, amax=1.035, spar=0.0004, spat=0.0004, fout = fout_tag)
+    print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
+#    with open(os.path.join(Hdir, '2Dbaofits', fout_tag + '-confidence_region.pkl'), 'wb') as handle:
+#        pickle.dump(ans, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return alrm, altm
 
 
 if __name__ == '__main__':
 
-    # read in data: monoquad covariance matrix, r bins centres, xi_0, xi_2
-    c = np.loadtxt(datadir+ft+zb+'covariance_monoquad_'+bc)
-    rbc = np.loadtxt(datadir+ft+zb+'correlation_function_monopole_'+bc)[:, 0]
-    d0 = np.loadtxt(datadir+ft+zb+'correlation_function_monopole_'+bc)[:, 1]
-    d2 = np.loadtxt(datadir+ft+zb+'correlation_function_quadrupole_'+bc)[:, 1]
-    if len(c) != len(d0)*2:
-        print('MISMATCHED data and cov matrix!')
-    if len(d0) != len(d2):
-        print('Mismatched 0 and 2 components of xi')
-    # create data vectors in the r range specified
-    r_mask = (rmin < rbc) & (rbc < rmax)
-    # factor to correct for pairs should have slightly larger average
-    # pair distance than the bin center // where does this come from?
-    rl = np.hstack([rbc[r_mask], rbc[r_mask]]) * 1.000396
-    dv = np.hstack([d0[r_mask], d2[r_mask]])
-    rb_mask = r_mask & (rbc < rbmax)
-    rlb = np.hstack([rbc[rb_mask], rbc[rb_mask]]) * 1.000396
-    dvb = np.hstack([d0[rb_mask], d2[rb_mask]])
-    print('length of data vector (0 and 2 components): ', len(dv))
-    # create cov matrix for fitting, must keep cov between mono and quadrupole
-    ri_mask = np.tile(r_mask, (len(r_mask), 1)).transpose()
-    rj_mask = np.tile(r_mask, (len(r_mask), 1))
-    quadrant_mask = ri_mask & rj_mask
-    covm_mask = np.tile(quadrant_mask, (2, 2))
-    covm = c[covm_mask].reshape(dv.size, dv.size)
-    invc = np.linalg.pinv(covm)  # inverse cov matrix to pass to the code
-    rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()
-    rbj_mask = np.tile(rb_mask, (len(rb_mask), 1))
-    quadrant_mask = rbi_mask & rbj_mask
-    covmb_mask = np.tile(quadrant_mask, (2, 2))
-    covmb = c[covmb_mask].reshape(dvb.size, dvb.size)
-    invc = np.linalg.pinv(covm)  # inverse cov matrix to pass to the code
-    invcb = np.linalg.pinv(covmb)
-    # fit to template
-    mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  # BAO template used
-    ans = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb,
-                          spar=0.003, spat=0.003)
-    with open(os.path.join(Hdir, '2Dbaofits', 'confidence_region.pkl'),
-              'wb') as handle:
-        pickle.dump(ans, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    # baofit()
+    baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])

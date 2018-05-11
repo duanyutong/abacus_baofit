@@ -43,6 +43,7 @@
 \usepackage{graphicx}	% Including figure files
 \usepackage{amsmath}	% Advanced maths commands
 \usepackage{amssymb}	% Extra maths symbols
+% \usepackage{fourier}
 \usepackage{commath}
 \usepackage[alsoload=astro]{siunitx}
 \usepackage{hyperref}
@@ -112,36 +113,129 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 
 	\subsection{Reading Halo Catalogue}
 		
-		Given a cosmology and redshift, there are 16 boxes with different phases. For each phase, load the halo catalogue, and in the halo table, add the following columns:
-			\begin{align}
-				m_\text{halo, vir} & = m_\text{halo} \\
-				r_\text{halo, vir} & = r_\text{halo} \\
-				c_\text{NFW} & = \frac{R_\text{vir}}{r_\text{R, klypin}}
-			\end{align}
-		This is to keep the Abacus catalogues compatible with halotools, where these fields are assumed present. The NFW profile $\rho(r)$ describes dark matter density as a function of radius in the halo. NFW formula is just a very simple way of defining the halo concentration $c_\text{NFW}$, which fixes $\rho(r)$. The Klypin definition of the halo scale radius $R_\text{s}$ is considered more stable than the usual $R_\text{s}$.
+		Given a cosmology and a redshift, there are 16 boxes with varied phases. For each phase, load the halo catalogue produced by the Rockstar halo-finder. The virial mass and radius fields have inconsistent naming so add the following columns if they are not already present
+		\begin{align}
+			\mathtt{halo\_mvir} & = \mathtt{halo\_m} \\
+			\mathtt{halo\_rvir} & = \mathtt{halo\_r}
+		\end{align}
+		to keep the Abacus catalogues compatible with halotools, where these fields are assumed to be present. The halo mass field \texttt{halo\_mgrav} is preferred over \texttt{halo\_mvir} in calculations because \texttt{halo\_mvir} only works well for large halos and misbehaves for small halos as well as subhalos. For our analysis the distinction is not important though. 
+		
+		The NFW profile $\rho(r)$ is a mass distribution model for dark matter halos as a function of radius. The profile is completely characterised by \texttt{halo\_mvir} and the the concentration $c_\text{NFW} \equiv R_\text{vir}/{R_s}$, where $R_s$ is the scale radius of the halo (see \href{http://halotools.readthedocs.io/en/latest/source_notes/empirical_models/phase_space_models/nfw_profile_source_notes.html#nfw-profile-tutorial}{halotools implementation} for formulae). The Klypin definition of the halo scale radius $R_\text{s}$ is considered more stable than the usual $R_\text{s}$ for small halos. The NFW concentration field is added to halo table as well.
+		\begin{equation}
+			\mathtt{halo\_nfw\_conc} = \frac{\mathtt{halo\_rvir}}{\mathtt{halo\_klypin\_rs}}.
+		\end{equation}
 		
 	\subsection{Populating Halos with Galaxies}
-	
-		There are many Halo Occupation Distribution (HOD) models available which put synthetic galaxies in the dark matter halos. Some mainstream ones are \texttt{['zheng07', 'leauthaud11', 'tinker13', 'hearin15', 'zu\_mandelbaum15', 'zu\_mandelbaum16', 'cacciato09']}.
 		
-		There are a number of parameters that can be varied in each model. For a $(\SI{1100}{\mega\parsec/h})^3$ simulation box and \texttt{zheng07} model with magnitude threshold = -18, particle number cut = 1, and other default parameters, typical numbers are
+		Halotools treats all halos as spherical and uses NFW profiles to paint galaxies. Several mainstream HOD models are built in to halotools: \texttt{['zheng07', 'leauthaud11', 'tinker13', 'hearin15', 'zu\_mandelbaum15', 'zu\_mandelbaum16', 'cacciato09']}. We tune the model parameters to generate LRG-like samples. For a $(\SI{1100}{\mega\parsec/h})^3$ simulation box, typical numbers are
 		\begin{align}
 			N_\text{halos} & = \num{8e6}\\
-			N_\text{galaxies} & = \num{1.5e7}.
+			N_\text{galaxies} & = \num{5e5}.
 		\end{align}
-		For comparison, in BOSS DR12 there are \num{1.2e6} galaxies in three redshift bins, 0.38, 0.51, and 0.61.
+		The \cite{zheng07} model used in SDSS is an essential model with 5 parameters, $(M_\text{cut}, \sigma, M_0, M_1, \alpha)$. The mean halo occupation numbers per halo for central and satellite galaxies are given by
+		\begin{align}
+			\left< N_\text{cen} (M) \right> &= \frac{1}{2} \left[ 1 + \mathrm{erf} \left( \frac{\log M - \log M_\text{cut}}{\sigma} \right) \right] \nonumber \\
+			&= \frac{1}{2} \mathrm{erfc} \left( \frac{\log(M_\text{cut} / M)}{\sigma} \right) \\
+			\left< N_\text{sat} (M) \right> &= \left< N_\text{cen} (M) \right> \left( \frac{M - M_0}{M_1} \right) ^\alpha \, .
+		\end{align}
 		
-	\subsection{Correlation Functions}
+		Since Abacus enables direct access to DM particles beyond standard halo metadata, a DM particle-based approach can be used to populate halos, without invoking NFW concentrations. Satellite galaxies are assigned to each DM particle within the halo with a certain probability, such that the resulting mean occupation is as specified by the HOD model. This avoids sphericalising halos and respects the morphology of halos when assigning synthetic galaxies. For the first BOSS analyses \cite{white11} used Zheng's formalism but with slightly different parametrisations,
+		\begin{align}
+			\left< N_\text{cen} (M) \right> &= \frac{1}{2} \mathrm{erfc} \left( \frac{\ln(M_\text{cut} / M)}{\sqrt{2} \sigma^\prime} \right) \\
+			\left< N_\text{sat} (M) \right> &= \left< N_\text{cen} (M) \right> \left( \frac{M - \kappa M _\text{cut} }{M_1} \right) ^\alpha \, .
+		\end{align}
+		where the argument inside erf has an extra factor of $\ln 10 / \sqrt{2}$, and $M_0$ is replaced with $\kappa M_\text{min}$. The reason for the trivial change of parametrisation was that ``our definition of $\sigma$ can be interpreted as a fractional `scatter' in
+		mass at threshold". Conversion of SDSS/BOSS empirical values to the new parameters $(M_\text{cut}, \sigma^\prime, \kappa, M_1, \alpha)$  can be done simply by
+		\begin{align}
+			\sigma ^\prime &= \frac{\ln 10}{\sqrt{2}} \sigma \\
+			\kappa &= \frac{M_0}{M_\text{min}}
+		\end{align}
+		with $M_\text{cut}$, $M_1$ and $\alpha$ remaining the same.
 		
-		All counting is done in fine $(s, \mu)$ bins. $s$ bin edges are from 0 to \SI{150}{\mega\parsec/h} at \SI{5}{\mega\parsec/h} steps, and $\mu=\cos\theta$ bin edges are from 0 to 1 at 0.01 steps, meaning a total of $(150, 100)$ bins. For the PH natural estimator, $DD$ and $RR$ are all we need.
+		When populating halo catalogues with galaxies, several observational corrections are made to the true position/velocity data. The velocity bias is corrected by randomly drawing the peculiar velocity from a normal distribution to account for the rms dispersion within the halo,
+		\begin{align}
+			v_\text{pec} &\sim N(0, \frac{v_\text{rms}}{\sqrt{3}} \alpha_c) \\
+			v_\text{los} ^\prime &= v_\text{los} + v_\text{pec}
+		\end{align}
+		assuming $v_\text{rms} = \sqrt{v_x^2 + v_y^2 + v_z^2}$ and $v_\text{los} = v_z$. Redshift-space distortion seen by an observer is just modifying the $z$-coordinate of the halo/galaxy, analytically
+		\begin{align}
+			x _z^\prime = x_z + \frac{v_z}{ a H(a) } = x_z + \frac{v_z}{\frac{H(z)}{1+z}} = x_z + \frac{1+z}{H(z)} v_z
+		\end{align}
+		as derived in \href{http://halotools.readthedocs.io/en/latest/source_notes/mock_observables/zspace_distortions.html}{halotools documentation}. This formula a very good approximation. However, halotools assumes $h=1$ and $H_0=100h = \SI{100}{\kilo\meter\per\second\per\mega\parsec}$, whereas our simulations are more realistic and were run with $h \approx 0.67$. There are two ways to manually add RSD, bypassing relevant halotools functionalities. One is to use Astropy's cosmology class, which comes as \texttt{halocat.cosmology} and includes the $E(z)$ function for the particular cosmology. With $H(z) \equiv H_0 E(z)$, RSD can be implemented as
+		\begin{equation}
+			x_z ^\prime = x_z + \frac{1+z}{H_0 E(z)} v_z
+		\end{equation}
+		The other way is to use the conversion factor in \texttt{halocat.header['VelZSpace\_to\_kms']}, defined as
+		\begin{equation}
+			\beta \equiv aH(z) L_\text{box} = \frac{H(z)}{1+z} L_\text{box}
+		\end{equation}
+		where $\beta$ is in \SI{}{\kilo\meter\per\second}  and $L_\text{box}$ in \SI{}{\mega\parsec}. RSD is then applied as
+		\begin{equation}
+		x_z ^\prime = x_z + \frac{L_\text{box}}{\beta} v_z \, .
+		\end{equation}
+		where $x_z$ and $v_z$ are in default catalogue units of $\SI{}{\mega\parsec}$ and $\SI{}{\kilo\meter\per\second}$. These two methods are numerically equivalent up to 1 in $10^{15}$.
 		
-		Auto-correlation $DD$ pair counts of the simulation box is saved as \texttt{paircount-DD.npy} in original Currfunc count format, a structured array. Note that \texttt{c\_api\_timer} needs to be turned off for this to be saved and recovered properly and not as ``object'' type.
+		The following is yet to be implemented. For each of the 16 phase boxes, the random number generator is seeded such that the DM particles each receive the same random number in a fixed order regardless of HOD parameters.  To further increase the signal-to-noise in the cluster-
+		ing statistics, 16 realisations of a given HOD is generated with different initial seeds.
+
+	\subsection{Galaxy Pair Counting}
+	
+		All counting is done in fine $(s, \mu)$ bins: $s$ bin edges are from 0 to \SI{150}{h \tothe{-1} \mega\parsec} at \SI{1}{h \tothe{-1} \mega\parsec} steps, and $\mu=\cos\theta$ bin edges are from 0 to 1 at 0.01 steps, meaning a total of $(150, 100)$ bins.
 		
-		$RR$ pair counts can be calculated analytically as given in the appendix.
+		We need the auto-counts for each box to calculate the auto-correlation for the whole box, and the cross-counts between the box and a subvolume of itself to calculate cross-correlation and estimate the covariance matrix. All these counts are saved to disk. Raw counts are saved as \texttt{paircount-DD.npy} in the original Currfunc count format, i.e. a structured array. Note that \texttt{c\_api\_timer} needs to be turned off in Corrfunc for this file to be saved and recovered properly and not as ``object'' type. 
+		
+		The optimal $s$ bin size and range for fitting were studied in BOSS DR12 analysis \cite{boss_dr12_bao}. Based on these results, we choose the bin	size \SI{5}{h \tothe{-1} \mega\parsec} and the range $\SI{50}{h \tothe{-1} \mega\parsec} < s < \SI{150}{h \tothe{-1} \mega\parsec}$. Also we use a $\mu$ bin size of 0.05 to be consistent with BOSS DR12. The raw counts were re-binned into $(30, 20)$ coarse bins and total pair counts verified.
+		
+	\subsection{Auto-correlation Functions}
+		
+		The PH natural estimator of the auto-correlation requires $DD$ and $RR$ counts for each phase box. $DD$ is calculated using the re-binned DD counts for $(30, 20)$ bins. $RR$ pair counts are calculated for the same bins analytically as given in Appendix \ref{appendix_auto_correlation}.
+		
+		The auto-correlation function $\xi$ is decomposed into the monopole component $\xi_0$ for $\ell=0$ and the quadrupole component $\xi_2$ for $\ell=2$ in the Legendre spherical harmonics basis using
+		\begin{align}
+			\xi (s, \mu) 	&= \sum_{\ell} \xi_\ell (s) L_\ell(\mu) \\
+			\xi _\ell (s) 	&= \frac{2\ell + 1}{2} \int_{-1}^{1} \xi(s, \mu) L_\ell (\mu) \dif \mu \,
+		\end{align}
+		as shown in Fig. \ref{fig:xi_r10_phases}. 16 $\xi$ samples from 16 realisations are averaged and become a single auto-correlation result for the box. This averaging step can be done before or after multipole decomposition which is a linear operation.
+		
+		\begin{figure}
+			% To include a figure from a file named example.*
+			% Allowable file formats are eps or ps if compiling using latex
+			% or pdf, png, jpg if compiling using pdflatex
+			\includegraphics[width=\linewidth]{xi_r10_phases_tinker13.png}
+		    \caption{Monopole and quadrupole of auto-correlation functions for 16 phase boxes. Each box has 16 realisations overplotted, which are averaged to give one result.}
+		    \label{fig:xi_r10_phases}
+		\end{figure}
+		
+		Then we jackknife co-add the 16 boxes, dropping one box at a time and taking the mean of the other 15. This yields 16 jackknifed correlation function samples, and each one is passed on to the fitter for BAO fitting.
+
+	\subsection{Covariance Matrix}
+		
+		The BAO fitter takes correlation functions and covariance matrix as input. The covariance is empirically estimated. Each simulation box is divided into $\text{sub}^3=3^3$ subvolumes. The cross-correlation function between one subvolume and the entire box is calculated for all 16 phases, resulting in $27 \times 16 = 432$ correlation function samples (each one is an average of 16 realisations). With $(30, 20)$ total bins for $\xi_0$ and $\xi_2$, there are $30\times 20 \times 2 = 1200$ bins, monopole and quadrupole included. The covariance between every two $(s,\mu)$ bins is calculated from 432 samples, including the covariance between monopole and quadrupole. Thus resulting covariance matrix has shape $1200\times 1200$.
+		
+		Finally this covariance matrix needs to be rescaled to account for our volume and averaging tricks. The covariance scales inversely with volume, so the covariance derived from the subvolume ($1/27$ of the box's volume) is much larger than the actual. In addition, if we run 16 realisations and average over all of them, there is another factor of 16. Also due to jackknife, each sample is an average of 15 boxes, thus a factor of 15. Therefore the true covariance matrix is the one obtained from subvolume divided by $ ( 27\times 16 \times 15 )$.
 		
 \section{BAO Fitter}
 
-A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/LSSanalysis} used in BOSS DR12 for the paper on BAO in correlation functions. We rewrite the fitter in a modern style in Python conforming to PEP standards. 
+	A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/LSSanalysis} used for BOSS DR12 analysis. The fitter takes correlation function $\xi_0, \xi_2$ in all $(s,\mu)$ bins and the covariance between all bins as input, and evaluates $\chi^2$ on the $(\alpha_\varparallel, \alpha_\perp)$ parameter grid.
+	
+	The log likelihood ratio follows a $\chi^2$ distribution. In the $(\alpha_\varparallel, \alpha_\perp)$ two-parameter plane, we may find the confidence region for any confidence level $\sigma$ by calculating the constant $\Delta\chi^2$ contour. The probability corresponding to confidence level $\sigma$ is $P = \mathrm{Erf} (\sigma / \sqrt{(2)})$, and the contour can be found by
+	\begin{equation}
+		\Delta \chi^2 = Q(P)
+	\end{equation}
+	where $Q$ is the quantile function (percent-point function) for a $\chi^2$ distribution with $\mathrm{dof}=2$.
+	
+	With 16 jackknife $\xi$ samples and a covariance matrix for each HOD model, we obtain 16 $ (\alpha_\varparallel, \alpha_\perp) $ values by finding the global $\chi^2$ minimum. Then for every pair of HOD models $M_i$ and $M_j$, we calculate 16 phase-matched differences $\alpha_{ij} = \alpha_i - \alpha_j$, plotted in Fig. \ref{fig:alpha_hod_compare}.
+	
+	\begin{figure}
+		% To include a figure from a file named example.*
+		% Allowable file formats are eps or ps if compiling using latex
+		% or pdf, png, jpg if compiling using pdflatex
+		\includegraphics[width=\linewidth]{alpha_pair_compare.png}
+	    \caption{Comparison of $ (\alpha_\varparallel, \alpha_\perp) $ for four HOD models done in halotools. vertical axis is $\alpha_\varparallel$, horizontal $\alpha_\perp$. }
+	    \label{fig:alpha_hod_compare}
+	\end{figure}
+	
+	We will rewrite the fitter in a modern style in Python conforming to PEP standards and optimising for performance.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -150,7 +244,7 @@ A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/L
 % The best way to enter references is to use BibTeX:
 
 \bibliographystyle{mnras}
-\bibliography{abacus_baofit_notes} % if your bibtex file is called example.bib
+\bibliography{ref} % if your bibtex file is called example.bib
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -158,10 +252,9 @@ A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/L
 
 \appendix
 
-
-
 \section{Auto-correlation Function Estimator}
-
+	\label{appendix_auto_correlation}
+	
 	In this implementation, raw pair counts are saved, and $N_\text{D}, N_\text{R}$ normalisation is done only at the estimator step.
 	
 	For auto-correlation of a sample in periodic box, the Peebles \& Hauser (1974) estimator (natural estimator) is
@@ -177,7 +270,8 @@ A recent, functional fitter is one by Ross \url{https://github.com/ashleyjross/L
 	where $\dif V(s, \mu)$ is the volume of the $(s, \mu)$ bin.
 	
 \section{Cross-correlation Function Estimator}
-
+	\label{appendix_cross_correlation}
+	
 	For cross-correlation between a sample $D_1$ in the periodic simulation box and a subsample $D_2$ in its subvolume, the Davis \& Peebles (1983) estimator is
 	\begin{equation}
 		\xi = \frac{\bar{n}_\text{R1}}{\bar{n}_\text{D1}} \frac{D_1 D_2}{R_1 D_2} - 1
