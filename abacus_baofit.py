@@ -8,37 +8,44 @@ Created on Wed Oct 25 17:30:51 2017
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
 import os
+from glob import glob
 import itertools
 from multiprocessing import Pool
 import numpy as np
-from glob import glob
-import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+from astropy import table
 from halotools.mock_observables import tpcf_multipole
 from halotools.mock_observables.two_point_clustering.s_mu_tpcf import (
         spherical_sector_volume)
-
 from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
-from hod import initialise_model, populate_model
+from abacus_hod import initialise_model, populate_model
+from tqdm import tqdm
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'test'
+tagout = 'gen'
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
-phases = [0]  # range(16)  # [0, 1] # list(range(16))
 redshift = 0.7  # one redshift at a time instead of 'all'
-model_names = ['zheng07', 'gen1']
-N_sub = 3  # number of subvolumes per dimension
-N_cut = 70  # number particle cut, 100 corresponds to 1e12 Msun
+model_names = ['gen_base1', 'gen_base2', 'gen_base3',
+               'gen_ass1', 'gen_ass2', 'gen_ass3']
+N_sub = 3  # number of subvolumes per dWimension
+N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_reals = 10  # indices for realisations for an HOD, list of integers
-N_threads = 10
+N_threads = 12
 
 # %% flags
 debug_mode = False
 save_hod_realisation = True
 use_analytic_randoms = True
 use_jackknife = True
-use_rsd = True
+add_rsd = True
 use_subhalos = False
 
 # %% bin settings
@@ -184,7 +191,7 @@ def make_halocat(phase):
         sim_name=sim_name_prefix, products_dir=prod_dir,
         redshifts=[redshift], cosmologies=[cosmology], phases=[phase],
         halo_type=halo_type,
-        load_halo_ptcl_catalog=False,  # this loads subsamples, does not work
+        load_halo_ptcl_catalog=True,  # this loads 10% particle subsamples
         load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
         load_pids='auto')
 
@@ -252,9 +259,9 @@ def do_auto_count(model, do_DD=True, do_RR=True):
     if not use_analytic_randoms or debug_mode:
         ND = len(model.mock.galaxy_table)
         NR = ND
-        xr = np.random.uniform(0, L, NR)
-        yr = np.random.uniform(0, L, NR)
-        zr = np.random.uniform(0, L, NR)
+        xr = np.random.uniform(0, L, NR).astype(np.float32)
+        yr = np.random.uniform(0, L, NR).astype(np.float32)
+        zr = np.random.uniform(0, L, NR).astype(np.float32)
         RR = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
                    xr, yr, zr, periodic=True, verbose=False,
                    boxsize=L, c_api_timer=False)
@@ -277,7 +284,7 @@ def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
 
-    for i, j, k in itertools.product(range(N_sub), repeat=3):
+    for i, j, k in tqdm(itertools.product(range(N_sub), repeat=3)):
 
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
         mask = ((l_sub * i < gtab['x']) & (gtab['x'] <= l_sub * (i+1)) &
@@ -595,7 +602,7 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
                         save_dir, sim_name, 'z{}-r*'.format(redshift),
                         '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
         print('Calculating covariance matrix using {} xi samples from all'
-              'phases for l = {}...'
+              ' phases for l = {}...'
               .format(len(paths), ell))
         # read in all xi files for all phases
         xi_list = [np.loadtxt(path)[:, 1] for path in paths]
@@ -644,10 +651,13 @@ def do_realisations(halocat, model_name, N_reals=16):
     then co-add them and get a single set of xi data
     the rest of the programme will work as if there is only 1 realisation
     '''
-
-    model = initialise_model(halocat, model_name=model_name,
+    sim_name = halocat.header['SimName']
+    phase = halocat.ZD_Seed
+    model = initialise_model(halocat.redshift, model_name,
                              halo_m_prop=halo_m_prop)
-    sim_name = halocat.SimName
+    model.N_cut = N_cut
+    model.c_median_poly = np.poly1d(
+        np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
     # create n_real realisations of the given HOD model
     xi_list_reals = []
     xi_0_list_reals = []
@@ -665,16 +675,22 @@ def do_realisations(halocat, model_name, N_reals=16):
                   '---'
                   .format(r+1, N_reals, model_name))
         else:
-            print(filepath, 'does not exist')
             print('---\n'
                   'Generating {} of {} realisations for model {} ...\n'
                   '---'
                   .format(r+1, N_reals, model_name))
-            model = populate_model(halocat, model, N_cut=N_cut,
-                                   use_rsd=use_rsd, use_subhalos=use_subhalos)
+            # set random seed using phase and realisation index r, model indep
+            np.random.seed(phase*100 + r)
+            model = populate_model(halocat, model,
+                                   add_rsd=add_rsd, use_subhalos=use_subhalos)
             # save galaxy table
             if save_hod_realisation:
-                model.mock.galaxy_table.write(filepath, format='ascii.ecsv')
+                print('Saving galaxy table to: {} ...'.format(filepath))
+                if not os.path.exists(os.path.dirname(filepath)):
+                    os.makedirs(os.path.dirname(filepath))
+                model.mock.galaxy_table.write(
+                    filepath, format='ascii.fast_csv', overwrite=True)
+
             do_auto_count(model, do_DD=True, do_RR=True)
             do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
         # always rebin counts and calculate xi in case bins change
@@ -688,7 +704,7 @@ def do_realisations(halocat, model_name, N_reals=16):
     print('Co-adding auto-correlation for {} realisations...'.format(N_reals))
     xi_s_mu_ca, _, xi_0_ca, _, xi_2_ca, _ = \
         coadd_xi_list(xi_list_reals, xi_0_list_reals, xi_2_list_reals)
-    filedir = os.path.join(save_dir, halocat.SimName, 'z{}'.format(redshift))
+    filedir = os.path.join(save_dir, sim_name, 'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
     np.savetxt(os.path.join(filedir, '{}-auto-xi_s_mu.txt'
@@ -702,7 +718,7 @@ def do_realisations(halocat, model_name, N_reals=16):
                xi_2_ca, fmt=txtfmt)
 
 
-def run_baofit():
+def run_baofit_parallel():
 
     from baofit import baofit
 
@@ -727,15 +743,85 @@ def run_baofit():
     pool.map(baofit, list_of_inputs)
 
 
+def fit_c_median(phases=range(16)):
+
+    '''
+    median concentration as a function of log halo mass in Msun/h
+    c_med(log(m)) = poly(log(m))
+
+    '''
+    # check if output file already exists
+    if os.path.isfile(os.path.join(save_dir, 'c_median_poly.txt')):
+        return None
+    # load 16 phases for the given cosmology and redshift
+    print('Loading halo catalogues...')
+    halocats = abacus_ht.make_catalogs(
+        sim_name=sim_name_prefix, products_dir=prod_dir,
+        redshifts=[redshift], cosmologies=[cosmology], phases=phases,
+        halo_type=halo_type,
+        load_halo_ptcl_catalog=False,  # this loads 10% particle subsamples
+        load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
+        load_pids='auto')[0][0]
+    htabs = [halocat.halo_table for halocat in halocats]
+    htab = table.vstack(htabs)  # combine all phases into one halo table
+    mask = (htab['halo_N'] >= N_cut) & (htab['halo_upid'] == -1)
+    htab = htab[mask]   # mass cut
+    halo_logm = np.log10(htab['halo_mvir'].data)
+    halo_nfw_conc = htab['halo_rvir'].data / htab['halo_klypin_rs'].data
+    # set up bin edges, the last edge larger than the most massive halo
+    logm_bins = np.linspace(np.min(halo_logm), np.max(halo_logm)+0.001,
+                            endpoint=True, num=100)
+    logm_bins_centre = (logm_bins[:-1] + logm_bins[1:]) / 2
+    N_halos, _ = np.histogram(halo_logm, bins=logm_bins)
+    c_median = np.zeros(len(logm_bins_centre))
+    c_median_std = np.zeros(len(logm_bins_centre))
+    for i in range(len(logm_bins_centre)):
+        mask = (logm_bins[i] <= halo_logm) & (halo_logm < logm_bins[i+1])
+        c_median[i] = np.median(halo_nfw_conc[mask])
+        c_median_std[i] = np.std(halo_nfw_conc[mask])
+    # when there is 0 data point in bin, median = std = nan, remove
+    # when there is only 1 data point in bin, std = 0 and w = inf
+    # when there are few data points, std very small (<1), w large
+    # rescale weight by sqrt(N-1)
+    mask = c_median_std > 0
+    N_halos, logm_bins_centre, c_median, c_median_std = \
+        N_halos[mask], logm_bins_centre[mask], \
+        c_median[mask], c_median_std[mask]
+    weights = 1/np.array(c_median_std)*np.sqrt(N_halos-1)
+    coefficients = np.polyfit(logm_bins_centre, c_median, 3, w=weights)
+    print('Polynomial found as : {}.'.format(coefficients))
+    # save coefficients to txt file
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    np.savetxt(os.path.join(save_dir, 'c_median_poly.txt'),
+               coefficients, fmt=txtfmt)
+    c_median_poly = np.poly1d(coefficients)
+    # plot fit
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.errorbar(logm_bins_centre, c_median, yerr=c_median_std,
+                capsize=3, capthick=0.5, fmt='.', ms=4, lw=0.2)
+    ax.plot(logm_bins_centre, c_median_poly(logm_bins_centre), '-')
+    ax.set_title('Median Concentration Polynomial Fit from {} Boxes'
+                 .format(len(phases)))
+    fig.savefig(os.path.join(save_dir, 'c_median_poly.pdf'))
+
+    return halocats
+
+
 if __name__ == "__main__":
 
+    halocats = fit_c_median(phases=phases)
     for phase in phases:
-        cat = make_halocat(phase)
+        if halocats is None:
+            halocat = make_halocat(phase)
+        else:
+            halocat = halocats[phase]
+        # parallelise (model name, r)
         for model_name in model_names:
-            do_realisations(cat, model_name, N_reals=N_reals)
+            do_realisations(halocat, model_name, N_reals=N_reals)
 
     for model_name in model_names:
         do_coadd_phases(model_name, coadd_phases=phases)
         do_cov(model_name, N_sub=N_sub, cov_phases=phases)
 
-    run_baofit()
+    run_baofit_parallel()
