@@ -21,7 +21,7 @@ from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
 # from multiprocessing import Pool
-from tqdm import tqdm
+from tqdm import trange
 # from functools import partial
 
 
@@ -139,7 +139,7 @@ def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
 
     i = 0
     print('Calculating X2 for perihelion ranking...')
-    for i in tqdm(range(max_iter)):
+    for i in trange(max_iter):
         i = i + 1
         Xold = np.sqrt(X2)
         Xold[Xold == 0] = 1  # for cases where X=0, this ensures Xnew = 0
@@ -189,6 +189,11 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
 
     alpha : The power law index of the number of satellite galaxies.
 
+    alpha_c : float. The central velocity bias parameter. Modulates the
+    peculiar velocity of the central galaxy. The larger the absolute value of
+    the parameter, the larger the peculiar velocity of the central. The sign
+    of the value does not matter.
+
     s : The satellite profile modulation parameter. Modulates how the radial
     distribution of satellite galaxies within halos deviate from the radial
     profile of the halo. Positive value favors satellite galaxies to populate
@@ -200,11 +205,6 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     matter particle. Positive value favors high peculiar velocity satellite
     galaxies and vice versa. Note that our implementation preserves the
     Newton's second law of the satellite galaxies.
-
-    alpha_c : float. The central velocity bias parameter. Modulates the
-    peculiar velocity of the central galaxy. The larger the absolute value of
-    the parameter, the larger the peculiar velocity of the central. The sign
-    of the value does not matter.
 
     s_p : float. The perihelion distance modulation parameter. A positive
     value favors satellite galaxies to have larger distances to the halo
@@ -430,7 +430,7 @@ def populate_model(halocat, model,
                 ptab.remove_rows(ind)
             else:  # only copy particles in selected halos
                 print('Collecting particle table indices for copying...')
-                for i in tqdm(range(len(htab))):
+                for i in trange(len(htab)):
                     m = htab['halo_subsamp_start'][i]
                     n = htab['halo_subsamp_len'][i]
                     ind.append(np.uint64(np.arange(m, m+n)))
@@ -564,11 +564,11 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         # initialise column, astropy doesn't support empty columns
         ptab[key] = np.int32(-1)
     print('Calculating rankings within each halo...')
-    for i in tqdm(range(N_halos)):
+    for i in trange(N_halos):
         m = htab['halo_subsamp_start'][i]
         n = htab['halo_subsamp_len'][i]
         if model.param_dict['s'] != 0:
-            # furtherst particle has highest rank, closest has 0
+            # furtherst particle has lowest rank, 0, inner most N-1
             ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
                                     .argsort()[::-1].argsort()
         if model.param_dict['s_v'] != 0:
@@ -579,16 +579,16 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                                       .argsort()[::-1].argsort()
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
-    ptab['N_sat_rand'] = (
-        ptab['N_sat_rand'] *
+    ptab['N_sat_model'] = (
+        ptab['N_sat_model'] *
         (1 + model.param_dict['s']
          * (1 - 2*ptab['rank_s']/(ptab['halo_subsamp_len']-1))))
-    ptab['N_sat_rand'] = (
-        ptab['N_sat_rand'] *
+    ptab['N_sat_model'] = (
+        ptab['N_sat_model'] *
         (1 + model.param_dict['s_v']
          * (1 - 2*ptab['rank_s_v']/(ptab['halo_subsamp_len']-1))))
-    ptab['N_sat_rand'] = (
-        ptab['N_sat_rand'] *
+    ptab['N_sat_model'] = (
+        ptab['N_sat_model'] *
         (1 + model.param_dict['s_p']
          * (1 - 2*ptab['rank_s_p']/(ptab['halo_subsamp_len']-1))))
     # select particles which host satellites

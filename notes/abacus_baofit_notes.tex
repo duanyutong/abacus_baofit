@@ -125,7 +125,7 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 			\mathtt{halo\_nfw\_conc} = \frac{\mathtt{halo\_rvir}}{\mathtt{halo\_klypin\_rs}}.
 		\end{equation}
 		
-	\subsection{Populating Halos with Galaxies}
+	\subsection{Halotools Prebuilt HOD Models}
 		
 		Halotools treats all halos as spherical and uses NFW profiles to paint galaxies. Several mainstream HOD models are built in to halotools: \texttt{['zheng07', 'leauthaud11', 'tinker13', 'hearin15', 'zu\_mandelbaum15', 'zu\_mandelbaum16', 'cacciato09']}. We tune the model parameters to generate LRG-like samples. For a $(\SI{1100}{\mega\parsec/h})^3$ simulation box, typical numbers are
 		\begin{align}
@@ -139,48 +139,118 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 			\left< N_\text{sat} (M) \right> &= \left< N_\text{cen} (M) \right> \left( \frac{M - M_0}{M_1} \right) ^\alpha \, .
 		\end{align}
 		
-		Since Abacus enables direct access to DM particles beyond standard halo metadata, a DM particle-based approach can be used to populate halos, without invoking NFW concentrations. Satellite galaxies are assigned to each DM particle within the halo with a certain probability, such that the resulting mean occupation is as specified by the HOD model. This avoids sphericalising halos and respects the morphology of halos when assigning synthetic galaxies. For the first BOSS analyses \cite{white11} used Zheng's formalism but with slightly different parametrisations,
-		\begin{align}
-			\left< N_\text{cen} (M) \right> &= \frac{1}{2} \mathrm{erfc} \left( \frac{\ln(M_\text{cut} / M)}{\sqrt{2} \sigma^\prime} \right) \\
-			\left< N_\text{sat} (M) \right> &= \left< N_\text{cen} (M) \right> \left( \frac{M - \kappa M _\text{cut} }{M_1} \right) ^\alpha \, .
-		\end{align}
-		where the argument inside erf has an extra factor of $\ln 10 / \sqrt{2}$, and $M_0$ is replaced with $\kappa M_\text{min}$. The reason for the trivial change of parametrisation was that ``our definition of $\sigma$ can be interpreted as a fractional `scatter' in
-		mass at threshold". Conversion of SDSS/BOSS empirical values to the new parameters $(M_\text{cut}, \sigma^\prime, \kappa, M_1, \alpha)$  can be done simply by
-		\begin{align}
-			\sigma ^\prime &= \frac{\ln 10}{\sqrt{2}} \sigma \\
-			\kappa &= \frac{M_0}{M_\text{min}}
-		\end{align}
-		with $M_\text{cut}$, $M_1$ and $\alpha$ remaining the same.
+	\subsection{Generalised HOD Model}
 		
-		When populating halo catalogues with galaxies, several observational corrections are made to the true position/velocity data. The velocity bias is corrected by randomly drawing the peculiar velocity from a normal distribution to account for the rms dispersion within the halo,
-		\begin{align}
-			v_\text{pec} &\sim N(0, \frac{v_\text{rms}}{\sqrt{3}} \alpha_c) \\
-			v_\text{los} ^\prime &= v_\text{los} + v_\text{pec}
-		\end{align}
-		assuming $v_\text{rms} = \sqrt{v_x^2 + v_y^2 + v_z^2}$ and $v_\text{los} = v_z$. Redshift-space distortion seen by an observer is just modifying the $z$-coordinate of the halo/galaxy, analytically
-		\begin{align}
-			x _z^\prime = x_z + \frac{v_z}{ a H(a) } = x_z + \frac{v_z}{\frac{H(z)}{1+z}} = x_z + \frac{1+z}{H(z)} v_z
-		\end{align}
-		as derived in \href{http://halotools.readthedocs.io/en/latest/source_notes/mock_observables/zspace_distortions.html}{halotools documentation}. This formula a very good approximation. However, halotools assumes $h=1$ and $H_0=100h = \SI{100}{\kilo\meter\per\second\per\mega\parsec}$, whereas our simulations are more realistic and were run with $h \approx 0.67$. There are two ways to manually add RSD, bypassing relevant halotools functionalities. One is to use Astropy's cosmology class, which comes as \texttt{halocat.cosmology} and includes the $E(z)$ function for the particular cosmology. With $H(z) \equiv H_0 E(z)$, RSD can be implemented as
-		\begin{equation}
-			x_z ^\prime = x_z + \frac{1+z}{H_0 E(z)} v_z
-		\end{equation}
-		The other way is to use the conversion factor in \texttt{halocat.header['VelZSpace\_to\_kms']}, defined as
-		\begin{equation}
-			\beta \equiv aH(z) L_\text{box} = \frac{H(z)}{1+z} L_\text{box}
-		\end{equation}
-		where $\beta$ is in \SI{}{\kilo\meter\per\second}  and $L_\text{box}$ in \SI{}{\mega\parsec}. RSD is then applied as
-		\begin{equation}
-		x_z ^\prime = x_z + \frac{L_\text{box}}{\beta} v_z \, .
-		\end{equation}
-		where $x_z$ and $v_z$ are in default catalogue units of $\SI{}{\mega\parsec}$ and $\SI{}{\kilo\meter\per\second}$. These two methods are numerically equivalent up to 1 in $10^{15}$.
+		\subsubsection{Baseline Model (Zheng07 or White11)}
+			
+			Since Abacus enables direct access to DM particles beyond standard halo metadata, a DM particle-based approach can be used to populate halos, without invoking NFW concentrations. Satellite galaxies are assigned to each DM particle within the halo with a certain probability, such that the resulting mean occupation is as specified by the HOD model. This avoids sphericalising halos and respects the morphology of halos when assigning synthetic galaxies. For the first BOSS analyses \cite{white11} used Zheng's formalism but with slightly different parametrisations,
+			\begin{align}
+				\left< N_\text{cen} (M) \right> &= \frac{1}{2} \mathrm{erfc} \left( \frac{\ln(M_\text{cut} / M)}{\sqrt{2} \sigma^\prime} \right) \\
+				\left< N_\text{sat} (M) \right> &= \left< N_\text{cen} (M) \right> \left( \frac{M - \kappa M _\text{cut} }{M_1} \right) ^\alpha \, .
+			\end{align}
+			where the argument inside erf has an extra factor of $\ln 10 / \sqrt{2}$, and $M_0$ is replaced with $\kappa M_\text{min}$. The reason for the trivial change of parametrisation was that ``our definition of $\sigma$ can be interpreted as a fractional `scatter' in mass at threshold". Conversion of SDSS/BOSS empirical values to the new parameters $(M_\text{cut}, \sigma^\prime, \kappa, M_1, \alpha)$  can be done simply by
+			\begin{align}
+				\sigma ^\prime &= \frac{\ln 10}{\sqrt{2}} \sigma \\
+				\kappa &= \frac{M_0}{M_\text{min}}
+			\end{align}
+			with $M_\text{cut}$, $M_1$ and $\alpha$ remaining the same.
+			
+			The halo table and particle subsample table are loaded with appropriate mass cut applied and subhalos dropped. This selection cut help to remove small halos whose profiles are strongly
+			affected by the force softening length, resulting in nonphysical halo profiles.When populating halo catalogues with galaxies, several observational effects are added to the truth so that the data appear realistic. The bias implementation in the generalised HOD model is similar to \cite{yuan2018}.
+			
+			With 16 phase boxes, to further increase the signal-to-noise in the clustering statistics, 10-16 realisations of a given HOD is generated with different initial seeds for each box. Given a phase $p$ and realisation $r$, the random number generator seed is chosen as
+			\begin{equation}
+				s = 100p + r
+			\end{equation}
+			which guarantees that the random numbers only depend on the phase and realisation since we never go beyond 100 realisations. All different HOD models result in the same random numbers assigned to halo centres and subsample DM particles in a fixed order regardless of any HOD parameters. 
+
+		\subsubsection{RSD for Centrals and Satellites}
 		
-		The following is yet to be implemented. For each of the 16 phase boxes, the random number generator is seeded such that the DM particles each receive the same random number in a fixed order regardless of HOD parameters.  To further increase the signal-to-noise in the cluster-
-		ing statistics, 16 realisations of a given HOD is generated with different initial seeds.
+			Redshift-space distortion seen by an observer is just modifying the $z$-coordinate of the halo/galaxy, analytically
+			\begin{align}
+				x _z^\prime = x_z + \frac{v_z}{ a H(a) } = x_z + \frac{v_z}{\frac{H(z)}{1+z}} = x_z + \frac{1+z}{H(z)} v_z
+			\end{align}
+			as derived in \href{http://halotools.readthedocs.io/en/latest/source_notes/mock_observables/zspace_distortions.html}{halotools documentation}. This formula a very good approximation. However, halotools assumes $h=1$ and $H_0=100h = \SI{100}{\kilo\meter\per\second\per\mega\parsec}$, whereas our simulations are more realistic and were run with $h \approx 0.67$, so we are avoiding the Halotools implementation. There are two ways to manually add RSD, bypassing relevant halotools functionalities. One is to use Astropy's cosmology class, which comes as \texttt{halocat.cosmology} and includes the $E$ function $E(z) = \int_{0}^{z} \frac{H_0}{H(z^\prime)} \dif z^\prime$ for the particular cosmology. With $H(z) \equiv H_0 E(z)$, RSD can be implemented as
+			\begin{equation}
+				x_z ^\prime = x_z + \frac{1+z}{H_0 E(z)} v_z
+			\end{equation}
+			The other way is to use the conversion factor in halo catalogue header \texttt{halocat.header['VelZSpace\_to\_kms']}, defined as
+			\begin{equation}
+				\beta \equiv aH(z) L_\text{box} = \frac{H(z)}{1+z} L_\text{box}
+			\end{equation}
+			where $\beta$ is in \SI{}{\kilo\meter\per\second}  and $L_\text{box}$ in \SI{}{\mega\parsec}. RSD is then applied as
+			\begin{equation}
+			x_z ^\prime = x_z + \frac{L_\text{box}}{\beta} v_z \, .
+			\end{equation}
+			where $x_z$ and $v_z$ are in default catalogue units of $\SI{}{\mega\parsec}$ and $\SI{}{\kilo\meter\per\second}$. These two methods are numerically equivalent up to 1 in $10^{15}$.
+			
+		\subsubsection{Assembly Bias for Centrals (Ranking)}
+			
+			First all catalogues from 16 phases are loaded with mass cut $4\times 10^{12} M_\odot$ and subhalos dropped, and for 100 log halo mass bins between the minimum and maximum log masses, the median NFW concentration is extracted. With 100 bin centre mvir values in unit of $h^{-1} M_\odot$ and 100 $c_\text{median}$ values, a 3rd order polynomial fit is performed and looks like Fig. \ref{fig:c_median_poly}.
+			
+			\begin{figure}
+				\includegraphics[width=\linewidth]{c_median_poly.pdf}
+			    \caption{Median concentration as a function of log virial mass.}
+			    \label{fig:c_median_poly}
+			\end{figure}
+			
+			Instead of the usual weight $ w = 1/\sigma(c)$ which yields very large weight for bins with very small number of halos and very small standard deviation in $c$, a correction is applied to explicitly weigh the number of halos in the bin
+			\begin{equation}
+				w = \frac{1}{\sigma(c)}  \sqrt{N_\text{halos} - 1}.
+			\end{equation}
+			Data are also masked for extremal cases where $N_\text{halos}$ in a bin is only 0 or 1.
+			
+			Now, with this polynomial fit, we may compare the $c_\text{NFW}$ of any given halo with the $c_\text{median}$ at that halo mass scale of the halo. Define pseudomass of centrals as
+			\begin{equation}
+				\log M_\text{pseudo} = log M + A_\text{cen} \left[ 2 \Theta(c-c_\text{med}) - 1 \right]
+			\end{equation}
+			so that when $c > c_\text{med}$ there is a $+A_\text{cen}$ correction, and when $c < c_\text{med}$, $-A_\text{cen}$.
+			
+			Next the masses and pseudomass are sorted and re-assigned to halos: the halo with highest pseudomass (rank 0 halo) gets the highest actual mass, and so forth. We have not modified any halo mass values, just re-assigned them by pseudomasses. The new halo masses are used as input for HOD models and calculating theoretical mean occupation $\left<N_\text{cen}\right>$, and never written to the original halo table.
+			
+		\subsubsection{Velocity Bias for Centrals}
+		
+			The velocity bias for central galaxies is added by randomly drawing the peculiar velocity from a normal distribution corresponding to the RMS dispersion within the halo,
+			\begin{align}
+				v_\text{pec} &\sim N(0, \frac{v_\text{rms}}{\sqrt{3}} \alpha_c) \\
+				v_\text{los} ^\prime &= v_\text{los} + v_\text{pec}
+			\end{align}
+			assuming $v_\text{rms} = \sqrt{v_x^2 + v_y^2 + v_z^2}$ and $v_\text{los} = v_z$.
+			
+		\subsubsection{Assembly Bias for Satellites (Ranking)}
+			
+			The assembly bias for satellites is completely independent from that for centrals, and either can be turned on or off. The original halo masses are read from halo table again, and re-assigned using pseudomass
+			\begin{equation}
+				\log M_\text{pseudo} = log M + A_\text{sat} \left[ 2 \Theta(c-c_\text{med}) - 1 \right]
+			\end{equation}
+			and the HOD models take new masses as input and produce $\left<N_\text{sat}\right>(M)$. No particle property is involved here and $\overline{p} = \left< N_\text{sat} \right> / N_\text{part}$ is the same for all particles in the same halo.
+			
+		\subsubsection{Host Centric Distance Ranking for Satellites}
+			
+			The probability of a particle hosting a satellite straight from an HOD model $\overline{p} = \left<N_\text{sat}\right> / N_\text{part}$ is modified by several ranking procedures. The first is ranking by host centric distance, i.e. the distance between the particle and halo centre. The furthest particle gets rank $r_i=0$, and so forth. With a constant modulation parameter $s$ specified, the probability is modified as
+			\begin{equation}
+				p_i = \overline{p} \left[ 1 + s (1 - \frac{2 r_i}{N_\text{part} - 1}) \right] .
+			\end{equation}
+			
+		\subsubsection{Velocity Bias for Satellites (Ranking)}
+			
+			The second particle ranking procedure adds velocity bias for satellites. The peculiar speed of each halo particle is calculated, and within each halo, the particles are ranked by their peculiar speed: particle with highest peculiar speed has rank $r_i=0$. The probability then becomes
+			\begin{equation}
+				p_i ^\prime = p_i \left[ 1 + s_v (1 - \frac{2 r_i}{N_\text{part} - 1}) \right] .
+			\end{equation}
+			
+		\subsubsection{Perihelion Distance Ranking for Satellites}
+			
+			The last particle ranking procedure ranks particles by their distance of closest approach to halo centre. The perihelion distance $r_\text{min}$ is numerically approximated with an iterative approach (\cite{yuan2018}), which takes ~10 iterations for average fractional error to reach 10\% and ~30 iterations for the maximum fractional error to drop below 10\%. Particle with the largest $r_\text{min}$ gets rank $r_i = 0$. Then again
+			\begin{equation}
+				p_i ^\prime = p_i \left[ 1 + s_p (1 - \frac{2 r_i}{N_\text{part} - 1}) \right] .
+			\end{equation}
+			
+		Finally, each particle gets a random number between 0 and 1, and those below the theoretical $p_i$ get satellites. Even when the HOD models give negative probabilities, this will not misbehave. For each realisation of each HOD model in each phase box, the galaxy table is saved as in astropy ASCII csv format.
 
 	\subsection{Galaxy Pair Counting}
 	
-		All counting is done in fine $(s, \mu)$ bins: $s$ bin edges are from 0 to \SI{150}{h \tothe{-1} \mega\parsec} at \SI{1}{h \tothe{-1} \mega\parsec} steps, and $\mu=\cos\theta$ bin edges are from 0 to 1 at 0.01 steps, meaning a total of $(150, 100)$ bins.
+		All counting is done in fine $(s, \mu)$ bins: $s$ bin edges are from 0 to \SI{150}{h \tothe{-1} \mega\parsec} at \SI{1}{h \tothe{-1} \mega\parsec} steps, and $\mu \equiv \cos\theta$ bin edges are from 0 to 1 at 0.01 steps, meaning a total of $(150, 100)$ bins.
 		
 		We need the auto-counts for each box to calculate the auto-correlation for the whole box, and the cross-counts between the box and a subvolume of itself to calculate cross-correlation and estimate the covariance matrix. All these counts are saved to disk. Raw counts are saved as \texttt{paircount-DD.npy} in the original Currfunc count format, i.e. a structured array. Note that \texttt{c\_api\_timer} needs to be turned off in Corrfunc for this file to be saved and recovered properly and not as ``object'' type. 
 		
@@ -192,10 +262,12 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 		
 		The auto-correlation function $\xi$ is decomposed into the monopole component $\xi_0$ for $\ell=0$ and the quadrupole component $\xi_2$ for $\ell=2$ in the Legendre spherical harmonics basis using
 		\begin{align}
-			\xi (s, \mu) 	&= \sum_{\ell} \xi_\ell (s) L_\ell(\mu) \\
-			\xi _\ell (s) 	&= \frac{2\ell + 1}{2} \int_{-1}^{1} \xi(s, \mu) L_\ell (\mu) \dif \mu \,
+			\xi (s, \mu) 	&= \sum_{\ell} \xi_\ell (s) P_\ell(\mu) \\
+			\xi _\ell (s) 	&= \frac{2\ell + 1}{2} \int_{-1}^{1} \xi(s, \mu) P_\ell (\mu) \dif \mu \,
 		\end{align}
-		as shown in Fig. \ref{fig:xi_r10_phases}. 16 $\xi$ samples from 16 realisations are averaged and become a single auto-correlation result for the box. This averaging step can be done before or after multipole decomposition which is a linear operation.
+		as shown in Fig. \ref{fig:xi_r10_phases}. If
+		clustering were perfectly isotropic, the $\ell > 0$ moments would all be zero. Anisotropy introduces power into the even-order multipoles;
+		however, the odd-order multipoles are always zero due to symmetry. 16 $\xi$ samples from 16 realisations are averaged and become a single auto-correlation result for the box. This averaging step can be done before or after multipole decomposition which is a linear operation.
 		
 		\begin{figure}
 			% To include a figure from a file named example.*
@@ -210,9 +282,9 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 
 	\subsection{Covariance Matrix}
 		
-		The BAO fitter takes correlation functions and covariance matrix as input. The covariance is empirically estimated. Each simulation box is divided into $\text{sub}^3=3^3$ subvolumes. The cross-correlation function between one subvolume and the entire box is calculated for all 16 phases, resulting in $27 \times 16 = 432$ correlation function samples (each one is an average of 16 realisations). With $(30, 20)$ total bins for $\xi_0$ and $\xi_2$, there are $30\times 20 \times 2 = 1200$ bins, monopole and quadrupole included. The covariance between every two $(s,\mu)$ bins is calculated from 432 samples, including the covariance between monopole and quadrupole. Thus resulting covariance matrix has shape $1200\times 1200$.
+		The BAO fitter takes correlation functions and covariance matrix as input. The covariance is empirically estimated. Each simulation box is divided into $N_\text{sub}^3=3^3$ subvolumes. The cross-correlation function between one subvolume and the entire box is calculated for all 16 phases, resulting in $27 \times 16 = 432$ correlation function samples if there is only 1 realisation. For 10 realisations there would be 4320 samples. With $(30, 20)$ total $(s, \mu)$ bins for $\xi_0(s, \mu)$ and $\xi_2(s, \mu)$, there are $30\times 20 \times 2 = 1200$ bins, monopole and quadrupole included. The covariance between every two $(s,\mu)$ bins is calculated from 432 samples, including the covariance between monopole and quadrupole. Thus resulting covariance matrix has shape $1200\times 1200$.
 		
-		Finally this covariance matrix needs to be rescaled to account for our volume and averaging tricks. The covariance scales inversely with volume, so the covariance derived from the subvolume ($1/27$ of the box's volume) is much larger than the actual. In addition, if we run 16 realisations and average over all of them, there is another factor of 16. Also due to jackknife, each sample is an average of 15 boxes, thus a factor of 15. Therefore the true covariance matrix is the one obtained from subvolume divided by $ ( 27\times 16 \times 15 )$.
+		Finally this covariance matrix needs to be rescaled to account for our volume and averaging tricks. The covariance scales inversely with volume, so the covariance derived from the subvolume ($1/27$ of the box's volume) is 27 times the actual. In addition, if we run 10 realisations and average over all of them, there is another factor of 10. Also due to jackknife, each sample is an average of 15 boxes, thus a factor of 15. Therefore the true covariance matrix is the one obtained from subvolume divided by $ ( 27 \times 15 \times 10)$.
 		
 \section{BAO Fitter}
 
@@ -236,7 +308,39 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 	\end{figure}
 	
 	We will rewrite the fitter in a modern style in Python conforming to PEP standards and optimising for performance.
-
+	
+	Derivation of relevant equations. In fiducial configuration space, 
+	\begin{align}
+		r^2 	&= r_\varparallel ^2 + r_\perp ^2 \\
+		\mu^2 	&= \cos^2 \theta = \frac{r_\varparallel ^2}{r_\perp ^2} .
+	\end{align}
+	Define spherically averaged distance $D_V(z)$ and an anisotropy parameter $F_\text{AP}(z)$, 
+	\begin{align}
+		& D_V(z) = \left( D_A^2 (z) \frac{cz}{H(z)} \right) ^{1/3}\\
+		& F_\text{AP} (z) = D_A (z) \frac{H(z)}{c} .
+	\end{align}
+	One parametrisation is
+	\begin{align}
+		\alpha_\perp 		&= \frac{D_A(z) r_s ^\text{fid}}{D_Z^\text{fid} r_s} \\
+		\alpha_\varparallel &= \frac{H^\text{fid}(z) r_s^\text{fid}}{H(z) r_s}
+	\end{align}
+	and an alternative parametrisation is
+	\begin{align}
+		& \alpha 	= \frac{D_V(z) r_s^\text{fid}}{D_V^\text{fid}(z) r_s}
+				= \left[
+						\frac{ D_A^2(z) H^\text{fid} (z) }
+							 { {D_A^\text{fid}}^2 (z) H(z) }
+					\right] ^{1/3} \frac{r_s^\text{fid}}{r_s} \\
+		& 1 + \epsilon = \left[ \frac{ H^\text{fid}(z) D_A^\text{fid}(z) } { H(z) D_A(z) } \right] ^{1/3} .
+	\end{align}
+	The conversion between $(\alpha_\varparallel, \alpha_\perp)$ and $(\alpha, \epsilon)$ is
+	\begin{align}
+		& \alpha_\varparallel = \alpha (1+\epsilon) ^2 \\
+		& \alpha_\perp = \alpha (1+\epsilon) ^{-1} \\
+		& \alpha = \alpha_\varparallel ^{1/3} \alpha_\perp ^{2/3}\\
+		& 1+\epsilon = \left( \frac{\alpha_\varparallel}{\alpha_\perp} \right) ^{1/3}
+	\end{align}
+	
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%%%%
@@ -276,7 +380,7 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 	\begin{equation}
 		\xi = \frac{\bar{n}_\text{R1}}{\bar{n}_\text{D1}} \frac{D_1 D_2}{R_1 D_2} - 1
 	\end{equation}
-	where $\bar{n}_\text{D1}$ is the mean number density of data sample $D_1$, $\bar{n}_\text{R1}$ is the mean number density of $R_1$, the random sample corresponding to $D_1$, $D_1 D_2$ is the cross-correlation pair count between two data samples, and $R_1 D_2$ is the cross-correlation pair count between a random and a data sample. Usually a random sample is about 7 times the size of the corresponding data sample \citep{2008ApJ...687..919W}.
+	where $\bar{n}_\text{D1}$ is the mean number density of data sample $D_1$, $\bar{n}_\text{R1}$ is the mean number density of $R_1$, the random sample corresponding to $D_1$, $D_1 D_2$ is the cross-correlation pair count between two data samples, and $R_1 D_2$ is the cross-correlation pair count between a random and a data sample. Usually a random sample is about 7 times the size of the corresponding data sample \cite{2008ApJ...687..919W}.
 
 	Again one may generate a random sample $R_1$ in the same volume and do the cross counting, or alternatively calculate it analytically,
 	\begin{equation}

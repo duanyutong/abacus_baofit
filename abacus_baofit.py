@@ -19,7 +19,6 @@ from halotools.mock_observables.two_point_clustering.s_mu_tpcf import (
 from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
 from abacus_hod import initialise_model, populate_model
-from tqdm import tqdm
 
 import matplotlib
 matplotlib.use("Agg")
@@ -33,15 +32,16 @@ tagout = 'gen'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
-model_names = ['gen_base1', 'gen_base2', 'gen_base3',
-               'gen_ass1', 'gen_ass2', 'gen_ass3']
+model_names = ['gen_base1', 'gen_base2', 'gen_base3', 'gen_ass1']
+#model_names = ['gen_ass2', 'gen_ass3']
 N_sub = 3  # number of subvolumes per dWimension
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_reals = 10  # indices for realisations for an HOD, list of integers
-N_threads = 12
+N_threads = 16
 
 # %% flags
 debug_mode = False
+overwrite_mode = False
 save_hod_realisation = True
 use_analytic_randoms = True
 use_jackknife = True
@@ -60,7 +60,7 @@ n_mu_bins = 100  # for couting, mu bin size 0.01
 
 # %% fixed catalogue parameters
 prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
-save_dir = os.path.join('/home/dyt/analysis_data/', sim_name_prefix+'-'+tagout)
+save_dir = os.path.join('/home/dyt/store/', sim_name_prefix+'-'+tagout)
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
@@ -171,8 +171,10 @@ def coadd_xi_list(xi_s_mu_list, xi_0_list, xi_2_list):
     xi_s_mu_err = np.std(xi_s_mu_array, axis=0)
     xi_0_ca = np.mean(xi_0_array, axis=0)  # from coadding xi_0
     xi_0_err = np.std(xi_0_array, axis=0)
+    xi_0_err[:, 0] = xi_0_ca[:, 0]  # reset r vector, all zeros after std
     xi_2_ca = np.mean(xi_2_array, axis=0)  # from coadding xi_2
     xi_2_err = np.std(xi_2_array, axis=0)
+    xi_2_err[:, 0] = xi_2_ca[:, 0]  # reset r vector, all zeros after std
 
     return xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err
 
@@ -284,7 +286,7 @@ def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
 
-    for i, j, k in tqdm(itertools.product(range(N_sub), repeat=3)):
+    for i, j, k in itertools.product(range(N_sub), repeat=3):
 
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
         mask = ((l_sub * i < gtab['x']) & (gtab['x'] <= l_sub * (i+1)) &
@@ -658,6 +660,12 @@ def do_realisations(halocat, model_name, N_reals=16):
     model.N_cut = N_cut
     model.c_median_poly = np.poly1d(
         np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
+    # create a csv file to store galaxy table metadata
+    gt_meta = table.Table(
+            names=('model name', 'phase', 'realisation', 'seed',
+                   'N centrals', 'N satellites', 'N galaxies'),
+            dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+    gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'))
     # create n_real realisations of the given HOD model
     xi_list_reals = []
     xi_0_list_reals = []
@@ -666,10 +674,10 @@ def do_realisations(halocat, model_name, N_reals=16):
         # add useful model properties here
         model.r = r
         # check if current realisation, r, exists;
-        filepath = os.path.join(
+        gt_path = os.path.join(
                 save_dir, sim_name, 'z{}-r{}'.format(redshift, r),
                 '{}-galaxy_table.csv'.format(model_name))
-        if os.path.isfile(filepath):
+        if not overwrite_mode and os.path.isfile(gt_path):
             print('---\n'
                   '{} of {} realisations for model {} exists. \n'
                   '---'
@@ -680,16 +688,28 @@ def do_realisations(halocat, model_name, N_reals=16):
                   '---'
                   .format(r+1, N_reals, model_name))
             # set random seed using phase and realisation index r, model indep
-            np.random.seed(phase*100 + r)
+            seed = phase*100 + r
+            np.random.seed(seed)
             model = populate_model(halocat, model,
                                    add_rsd=add_rsd, use_subhalos=use_subhalos)
+            # save galaxy table meta
+            N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
+            N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
+            N_gal = len(model.mock.galaxy_tabl)
+            gt_meta = table.Table.read(os.path.join(save_dir,
+                                                    'galaxy_table_meta.csv'))
+
+            gt_meta.add_row((model_name, phase, r, seed, N_cen, N_sat, N_gal))
+            gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
+                          overwrite=True)
             # save galaxy table
             if save_hod_realisation:
-                print('Saving galaxy table to: {} ...'.format(filepath))
-                if not os.path.exists(os.path.dirname(filepath)):
-                    os.makedirs(os.path.dirname(filepath))
+                print('Saving galaxy table to: {} ...'.format(gt_path))
+                if not os.path.exists(os.path.dirname(gt_path)):
+                    os.makedirs(os.path.dirname(gt_path))
                 model.mock.galaxy_table.write(
-                    filepath, format='ascii.fast_csv', overwrite=True)
+                    gt_path, format='ascii.fast_csv',
+                    overwrite=overwrite_mode)
 
             do_auto_count(model, do_DD=True, do_RR=True)
             do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
@@ -716,31 +736,6 @@ def do_realisations(halocat, model_name, N_reals=16):
     np.savetxt(os.path.join(filedir, '{}-auto-xi_2.txt'
                             .format(model_name)),
                xi_2_ca, fmt=txtfmt)
-
-
-def run_baofit_parallel():
-
-    from baofit import baofit
-
-    filedir = os.path.join(
-            save_dir,
-            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
-            'z{}'.format(redshift))
-    list_of_inputs = []
-    for model_name in model_names:
-        for phase in phases:  # construct list of inputs for parallelisation
-            path_xi_0 = os.path.join(filedir,
-                                     '{}-auto-xi_0-coadd_jackknife_{}.txt'
-                                     .format(model_name, phase))
-            path_xi_2 = os.path.join(filedir,
-                                     '{}-auto-xi_2-coadd_jackknife_{}.txt'
-                                     .format(model_name, phase))
-            path_cov = os.path.join(filedir, '{}-cross-xi_monoquad-cov.txt'
-                                    .format(model_name))
-            fout_tag = '{}-{}'.format(model_name, phase)
-            list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    pool = Pool(N_threads)
-    pool.map(baofit, list_of_inputs)
 
 
 def fit_c_median(phases=range(16)):
@@ -808,20 +803,44 @@ def fit_c_median(phases=range(16)):
     return halocats
 
 
+def run_baofit_parallel(baofit_phases=range(16)):
+
+    from baofit import baofit
+
+    filedir = os.path.join(
+            save_dir,
+            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
+            'z{}'.format(redshift))
+    list_of_inputs = []
+    for model_name in model_names:
+        for phase in baofit_phases:  # list of inputs for parallelisation
+            path_xi_0 = os.path.join(filedir,
+                                     '{}-auto-xi_0-coadd_jackknife_{}.txt'
+                                     .format(model_name, phase))
+            path_xi_2 = os.path.join(filedir,
+                                     '{}-auto-xi_2-coadd_jackknife_{}.txt'
+                                     .format(model_name, phase))
+            path_cov = os.path.join(filedir, '{}-cross-xi_monoquad-cov.txt'
+                                    .format(model_name))
+            fout_tag = '{}-{}'.format(model_name, phase)
+            list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
+    pool = Pool()
+    pool.map(baofit, list_of_inputs)
+
+
 if __name__ == "__main__":
 
-    halocats = fit_c_median(phases=phases)
-    for phase in phases:
-        if halocats is None:
-            halocat = make_halocat(phase)
-        else:
-            halocat = halocats[phase]
-        # parallelise (model name, r)
-        for model_name in model_names:
-            do_realisations(halocat, model_name, N_reals=N_reals)
+    # halocats = fit_c_median(phases=phases)
+    # for phase in phases:
+    #     if halocats is None:
+    #         halocat = make_halocat(phase)
+    #     else:
+    #         halocat = halocats[phase]
+    #     for model_name in model_names:
+    #         do_realisations(halocat, model_name, N_reals=N_reals)
 
-    for model_name in model_names:
-        do_coadd_phases(model_name, coadd_phases=phases)
-        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+    # for model_name in model_names:
+    #     do_coadd_phases(model_name, coadd_phases=range(16))
+    #     do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
 
-    run_baofit_parallel()
+    run_baofit_parallel(baofit_phases=range(16))

@@ -1,15 +1,15 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (
+        absolute_import, division, print_function, unicode_literals)
 import os
 import numpy as np
 from scipy.optimize import minimize
-import pickle
 import sys
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/analysis_data/emulator_1100box_planck-mgrav/' # this is the save directory; must contain "2Dbaofits" folder
+Hdir = '/home/dyt/store/emulator_1100box_planck-gen/' # this is the save directory
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin
@@ -429,7 +429,7 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     
     B = 0.1
     BB = None
-    chiBmin = 2000
+    chiBmin = 3000
     while B < 2.:
         chiB = bb.chi_templ_alphfXX((B,0,0,0,1.,0,0,0))
         if chiB < chiBmin:
@@ -445,8 +445,8 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     b.Bp= Bp
     b.Bt = Bt
     if not os.path.exists(os.path.join(Hdir+'2Dbaofits')):
-        print('2Dbaofits DNE. Creating folder')
         os.makedirs(os.path.join(Hdir+'2Dbaofits'))
+        print('2Dbaofits folder DNE, created.')
     fo = open(Hdir+'2Dbaofits/'+fout+'-arat-covchi.dat','w+')
     fg = open(Hdir+'2Dbaofits/'+fout+'-arat-covchigrid.dat','w+')
     chim = 1000
@@ -498,17 +498,10 @@ def baofit(inputs):
 # def baofit():
 
     path_xi_0, path_xi_2, path_cov, fout_tag = inputs
-    # read in data
-    # c = np.loadtxt(datadir+ft+zb+'cross-xi_monoquad-cov'+bc)  # combined monopole, quadrupole cov matrix
-    # r_bins_centre = np.loadtxt(datadir+ft+zb+'auto-xi_0-coadd'+bc)[:, 0]
-    # d0 = np.loadtxt(datadir+ft+zb+'auto-xi_0-coadd'+bc)[:, 1]
-    # d2 = np.loadtxt(datadir+ft+zb+'auto-xi_2-coadd'+bc)[:, 1]
-
-    c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
     r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
     d0 = np.loadtxt(path_xi_0)[:, 1]
     d2 = np.loadtxt(path_xi_2)[:, 1]
-
+    c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
     if len(c) != len(d0)*2: print('MISMATCHED data and cov matrix!')
     if len(d0) != len(d2): print('0 and 2 components of xi mismatch')
     # create data vectors in given range
@@ -538,7 +531,7 @@ def baofit(inputs):
     invcb = np.linalg.pinv(covmb)
     # define template
     mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used     
-    alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, amin=1.005, amax=1.035, spar=0.0004, spat=0.0004, fout = fout_tag)
+    alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, amin=1.00, amax=1.04, spar=0.0004, spat=0.0004, fout = fout_tag)
     print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
 #    with open(os.path.join(Hdir, '2Dbaofits', fout_tag + '-confidence_region.pkl'), 'wb') as handle:
 #        pickle.dump(ans, handle, protocol=pickle.HIGHEST_PROTOCOL)
