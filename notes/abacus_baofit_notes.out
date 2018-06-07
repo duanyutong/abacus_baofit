@@ -6,6 +6,8 @@
 \BOOKMARK [2][-]{subsection.2.4}{Galaxy Pair Counting}{section.2}% 6
 \BOOKMARK [2][-]{subsection.2.5}{Auto-correlation Functions}{section.2}% 7
 \BOOKMARK [2][-]{subsection.2.6}{Covariance Matrix}{section.2}% 8
-\BOOKMARK [1][-]{section.3}{BAO Fitter}{}% 9
-\BOOKMARK [1][-]{section.A1}{Auto-correlation Function Estimator}{}% 10
-\BOOKMARK [1][-]{section.A2}{Cross-correlation Function Estimator}{}% 11
+\BOOKMARK [1][-]{section.3}{BAO Fitting Methods}{}% 9
+\BOOKMARK [2][-]{subsection.3.1}{BOSS DR12 Fitter}{section.3}% 10
+\BOOKMARK [2][-]{subsection.3.2}{Fitting Results}{section.3}% 11
+\BOOKMARK [1][-]{section.A1}{Auto-correlation Function Estimator}{}% 12
+\BOOKMARK [1][-]{section.A2}{Cross-correlation Function Estimator}{}% 13

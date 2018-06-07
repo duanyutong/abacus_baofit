@@ -32,12 +32,11 @@ tagout = 'gen'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
-model_names = ['gen_base1', 'gen_base2', 'gen_base3', 'gen_ass1']
-#model_names = ['gen_ass2', 'gen_ass3']
+model_names = ['gen_base3', 'gen_base1', 'gen_base2', 'gen_ass1', 'gen_ass2', 'gen_ass3']
 N_sub = 3  # number of subvolumes per dWimension
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_reals = 10  # indices for realisations for an HOD, list of integers
-N_threads = 16
+N_threads = 32
 
 # %% flags
 debug_mode = False
@@ -159,7 +158,7 @@ def xi1d_list_to_cov(xi_list):
 
     print('Calculating covariance matrix from {} xi multipole matrices...'
           .format(len(xi_list)))
-    return np.cov(np.array(xi_list).transpose())
+    return np.cov(np.array(xi_list).T, bias=0)
 
 
 def coadd_xi_list(xi_s_mu_list, xi_0_list, xi_2_list):
@@ -593,7 +592,7 @@ def do_coadd_phases(model_name, coadd_phases=range(16)):
                 xi_2_err, fmt=txtfmt)
 
 
-def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
+def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 
     # calculate cov combining all phases, 16 * N_sub^3 * N_reals
     for ell in [0, 2]:
@@ -608,7 +607,8 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
               .format(len(paths), ell))
         # read in all xi files for all phases
         xi_list = [np.loadtxt(path)[:, 1] for path in paths]
-        cov = xi1d_list_to_cov(xi_list) / np.power(N_sub, 3)/15/N_reals
+        # as cov gets smaller, chisq gets bigger, contour gets smaller
+        cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
         # save cov
         filepath = os.path.join(  # save to '-combined' folder for all phases
                 save_dir,
@@ -636,7 +636,7 @@ def do_cov(model_name, N_sub=3, cov_phases=list(range(16))):
             xi_0 = np.loadtxt(path0)[:, 1]
             xi_2 = np.loadtxt(path2)[:, 1]
             xi_list.append(np.hstack((xi_0, xi_2)))
-    cov_monoquad = xi1d_list_to_cov(xi_list) / np.power(N_sub, 3)/15/N_reals
+    cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
     # save cov
     filepath = os.path.join(  # save to '-combined' folder for all phases
             save_dir,
@@ -824,7 +824,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    pool = Pool()
+    pool = Pool(N_threads)
     pool.map(baofit, list_of_inputs)
 
 
@@ -839,8 +839,8 @@ if __name__ == "__main__":
     #     for model_name in model_names:
     #         do_realisations(halocat, model_name, N_reals=N_reals)
 
-    # for model_name in model_names:
-    #     do_coadd_phases(model_name, coadd_phases=range(16))
-    #     do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
+    for model_name in model_names:
+        do_coadd_phases(model_name, coadd_phases=phases)
+        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
 
-    run_baofit_parallel(baofit_phases=range(16))
+    run_baofit_parallel(baofit_phases=phases)
