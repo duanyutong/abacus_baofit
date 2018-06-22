@@ -10,6 +10,7 @@ from __future__ import (
 import os
 from glob import glob
 import itertools
+import functools
 from multiprocessing import Pool
 import numpy as np
 from astropy import table
@@ -24,19 +25,21 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
-
+from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'gen'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+tagout = 'sstest'
+phases = [0]  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
-model_names = ['gen_base3', 'gen_base1', 'gen_base2', 'gen_ass1', 'gen_ass2', 'gen_ass3']
-N_sub = 3  # number of subvolumes per dWimension
+model_names = ['gen_base3', 'gen_base1', 'gen_base2',
+               'gen_ass1', 'gen_ass2', 'gen_ass3']
+model_names = ['gen_base1']
+N_reals = 1  # indices for realisations for an HOD, list of integers
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_reals = 10  # indices for realisations for an HOD, list of integers
-N_threads = 32
+N_threads = 16
+N_sub = 3  # number of subvolumes per dWimension
 
 # %% flags
 debug_mode = False
@@ -45,7 +48,6 @@ save_hod_realisation = True
 use_analytic_randoms = True
 use_jackknife = True
 add_rsd = True
-use_subhalos = False
 
 # %% bin settings
 step_s_bins = 5  # mpc/h, bins for fitting
@@ -66,6 +68,56 @@ txtfmt = b'%.30e'
 
 
 # %% definitionss of statisical formulae
+
+def vrange(starts, lengths):
+    """Create concatenated ranges of integers for multiple start/stop
+
+    Parameters:
+        starts (1-D array_like): starts for each range
+        stops (1-D array_like): stops for each range (same shape as starts)
+
+    Returns:
+        numpy.ndarray: concatenated ranges
+
+    For example:
+
+        >>> starts = [1, 3, 4, 6]
+        >>> lengths = [0, 2, 3, 0]
+        >>> vrange(starts, lengths)
+        array([3, 4, 4, 5, 6])
+
+    """
+    lengths = np.asarray(lengths)
+    stops = starts + lengths
+    ret = (np.repeat(stops - lengths.cumsum(), lengths)
+           + np.arange(lengths.sum()))
+    return ret.astype(np.uint64)
+
+
+def sum_lengths(i, len_arr):
+
+    return np.sum(len_arr[i])
+
+
+def find_repeated_entries(arr):
+
+    '''
+    arr = array([1, 2, 3, 1, 1, 3, 4, 3, 2])
+    ret = [array([0, 3, 4]), array([1, 8]), array([2, 5, 7]), array([6])]
+    '''
+
+    idx_sort = np.argsort(arr)
+    sorted_arr = arr[idx_sort]
+    vals, idx_start = np.unique(sorted_arr, return_index=True,
+                                return_counts=False)
+    # split as sets of indices
+    idx_sort_split = np.split(idx_sort, idx_start[1:])
+    # filter w.r.t their size, keeping only items occurring more than once
+    # vals = vals[count > 1]
+    # ret = filter(lambda x: x.size > 1, res)
+    return vals, idx_sort, idx_sort_split
+
+
 def auto_analytic_random(ND, s_bins, mu_bins, V):
     '''
     DD and RR for auto-correlations
@@ -214,6 +266,51 @@ def make_halocat(phase):
     halocat.halo_table['halo_nfw_conc'] = (
         halocat.halo_table['halo_rvir'] / halocat.halo_table['halo_klypin_rs'])
 
+    return halocat
+
+
+def process_halocat(halocat):
+
+    # apply mass cut to halos, keeping only relevant child subhalos
+    # reduces 3/4 of workload compared to processing original table
+    # 'halo_num_child_particles', 'halo_num_p', 'halo_N', 'halo_alt_N'
+    # are all different fields, only halo_N corresponds to halo_mvir
+    print('Applying mass cut N={} to halocat and re-organising subsamples...'
+          .format(N_cut))
+    N0 = len(halocat.halo_table)
+    mask_halo = ((halocat.halo_table['halo_upid'] == -1)
+                 & (halocat.halo_table['halo_N'] >= N_cut))  # only host halos
+    mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)  # child subhalos
+                    & np.isin(
+                            halocat.halo_table['halo_upid'],
+                            halocat.halo_table['halo_id'][mask_halo]))
+    htab = halocat.halo_table[mask_halo | mask_subhalo]  # original order
+    print('Locating relavent halo host ids in halo table...')
+    hostids, hidx, hidx_split = find_repeated_entries(htab['halo_hostid'].data)
+    print('Collecting subsample particle indices...')
+    pidx = vrange(htab['halo_subsamp_start'][hidx],
+                  htab['halo_subsamp_len'][hidx])
+    ptab = halocat.halo_ptcl_table[pidx]
+#    ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
+    pool = Pool(N_threads)
+    ss_len = pool.map(functools.partial(sum_lengths,
+                                        len_arr=htab['halo_subsamp_len']),
+                      hidx_split)
+    htab = htab[htab['halo_upid'] == -1]  # drop subhalos now
+    assert len(htab) == len(hostids)  # sanity check, hostids are unique values
+    # overwrite halo_subsamp_len field to include subhalo particles
+    hidx = np.argsort(htab['halo_hostid'])
+    htab['halo_subsamp_len'][hidx] = ss_len
+    assert np.sum(htab['halo_subsamp_len']) == len(ptab)
+    htab['halo_subsamp_start'][0] = 0  # reindex halo_subsamp_start
+    htab['halo_subsamp_start'][1:] = htab['halo_subsamp_len'].cumsum()[:-1]
+    assert (htab['halo_subsamp_start'][-1] + htab['halo_subsamp_len'][-1]
+            == len(ptab))
+    halocat.halo_table = htab
+    halocat.halo_ptcl_table = ptab
+    print('Total N halos {}; mass cut mask {}; '
+          'subhalos cut mask {}; final N halos {}.'
+          .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab)))
     return halocat
 
 
@@ -660,12 +757,6 @@ def do_realisations(halocat, model_name, N_reals=16):
     model.N_cut = N_cut
     model.c_median_poly = np.poly1d(
         np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
-    # create a csv file to store galaxy table metadata
-    gt_meta = table.Table(
-            names=('model name', 'phase', 'realisation', 'seed',
-                   'N centrals', 'N satellites', 'N galaxies'),
-            dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-    gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'))
     # create n_real realisations of the given HOD model
     xi_list_reals = []
     xi_0_list_reals = []
@@ -674,14 +765,21 @@ def do_realisations(halocat, model_name, N_reals=16):
         # add useful model properties here
         model.r = r
         # check if current realisation, r, exists;
-        gt_path = os.path.join(
-                save_dir, sim_name, 'z{}-r{}'.format(redshift, r),
-                '{}-galaxy_table.csv'.format(model_name))
+        filedir = os.path.join(save_dir, sim_name,
+                               'z{}-r{}'.format(redshift, r))
+        gt_path = os.path.join(filedir,
+                               '{}-galaxy_table.csv'.format(model_name))
         if not overwrite_mode and os.path.isfile(gt_path):
             print('---\n'
                   '{} of {} realisations for model {} exists. \n'
                   '---'
                   .format(r+1, N_reals, model_name))
+            xi_s_mu = np.loadtxt(os.path.join(filedir, '{}-auto-xi_s_mu.txt'
+                                              .format(model_name)))
+            xi_0 = np.loadtxt(os.path.join(filedir, '{}-auto-xi_0.txt'
+                                           .format(model_name)))
+            xi_2 = np.loadtxt(os.path.join(filedir, '{}-auto-xi_2.txt'
+                                           .format(model_name)))
         else:
             print('---\n'
                   'Generating {} of {} realisations for model {} ...\n'
@@ -691,31 +789,37 @@ def do_realisations(halocat, model_name, N_reals=16):
             seed = phase*100 + r
             np.random.seed(seed)
             model = populate_model(halocat, model,
-                                   add_rsd=add_rsd, use_subhalos=use_subhalos)
+                                   add_rsd=add_rsd, N_threads=N_threads)
             # save galaxy table meta
             N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
             N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
-            N_gal = len(model.mock.galaxy_tabl)
-            gt_meta = table.Table.read(os.path.join(save_dir,
-                                                    'galaxy_table_meta.csv'))
-
+            N_gal = len(model.mock.galaxy_table)
+            if os.path.isfile(os.path.join(save_dir, 'galaxy_table_meta.csv')):
+                gt_meta = table.Table.read(
+                        os.path.join(save_dir, 'galaxy_table_meta.csv'))
+            else:
+                # create a csv file to store galaxy table metadata
+                gt_meta = table.Table(
+                        names=('model name', 'phase', 'realisation', 'seed',
+                               'N centrals', 'N satellites', 'N galaxies'),
+                        dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
             gt_meta.add_row((model_name, phase, r, seed, N_cen, N_sat, N_gal))
             gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
-                          overwrite=True)
+                          format='ascii.fast_csv', overwrite=True)
             # save galaxy table
             if save_hod_realisation:
                 print('Saving galaxy table to: {} ...'.format(gt_path))
                 if not os.path.exists(os.path.dirname(gt_path)):
                     os.makedirs(os.path.dirname(gt_path))
-                model.mock.galaxy_table.write(
-                    gt_path, format='ascii.fast_csv',
-                    overwrite=overwrite_mode)
+                model.mock.galaxy_table.write(gt_path,
+                                              format='ascii.fast_csv',
+                                              overwrite=overwrite_mode)
 
             do_auto_count(model, do_DD=True, do_RR=True)
             do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
-        # always rebin counts and calculate xi in case bins change
-        xi_s_mu, xi_0, xi_2 = do_auto_correlation(model)
-        do_subcross_correlation(model, N_sub=N_sub)
+            # always rebin counts and calculate xi in case bins change
+            xi_s_mu, xi_0, xi_2 = do_auto_correlation(model)
+            do_subcross_correlation(model, N_sub=N_sub)
         # collect auto-xi to coadd all realisations for the current phase
         xi_list_reals.append(xi_s_mu)
         xi_0_list_reals.append(xi_0)
@@ -830,17 +934,18 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
 if __name__ == "__main__":
 
-    # halocats = fit_c_median(phases=phases)
-    # for phase in phases:
-    #     if halocats is None:
-    #         halocat = make_halocat(phase)
-    #     else:
-    #         halocat = halocats[phase]
-    #     for model_name in model_names:
-    #         do_realisations(halocat, model_name, N_reals=N_reals)
-
-    for model_name in model_names:
-        do_coadd_phases(model_name, coadd_phases=phases)
-        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
-
-    run_baofit_parallel(baofit_phases=phases)
+#    halocats = fit_c_median(phases=phases)
+    for phase in phases:
+        try:
+            halocat = halocats[phase]
+        except:
+            halocat = make_halocat(phase)
+        halocat = process_halocat(halocat)
+        for model_name in model_names:
+            do_realisations(halocat, model_name, N_reals=N_reals)
+#
+#    for model_name in model_names:
+#        do_coadd_phases(model_name, coadd_phases=phases)
+#        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+#
+#    run_baofit_parallel(baofit_phases=phases)

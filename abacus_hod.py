@@ -49,19 +49,18 @@ def N_sat_mean(M, param_dict):
     return nsm
 
 
-def mean_occupation(model, halo_mass_bins):
+def mean_occupation(halo_table, galaxy_table, halo_mass_bins):
 
     '''
     return N_sat_mean, N_cen_mean, N_tot_mean
     all mass in unit of Msun/h
     '''
-    N_halos, _ = np.histogram(model.mock.halo_table['halo_mvir'],
-                              bins=halo_mass_bins)
-    mask_cen = model.mock.galaxy_table['gal_type'] == 'centrals'
-    mask_sat = model.mock.galaxy_table['gal_type'] == 'satellites'
-    N_cen, _ = np.histogram(model.mock.galaxy_table['halo_mvir'][mask_cen],
+    N_halos, _ = np.histogram(halo_table['halo_mvir'], bins=halo_mass_bins)
+    mask_cen = galaxy_table['gal_type'] == 'centrals'
+    mask_sat = galaxy_table['gal_type'] == 'satellites'
+    N_cen, _ = np.histogram(galaxy_table['halo_mvir'][mask_cen],
                             bins=halo_mass_bins)
-    N_sat, _ = np.histogram(model.mock.galaxy_table['halo_mvir'][mask_sat],
+    N_sat, _ = np.histogram(galaxy_table['halo_mvir'][mask_sat],
                             bins=halo_mass_bins)
     N_cen_mean = N_cen / N_halos
     N_sat_mean = N_sat / N_halos
@@ -94,7 +93,7 @@ def do_rsd(z, vz, redshift, cosmology, period):
     '''
     H0 = cosmology.H0.value  # cosmology.H0 returns an astropy quantity
     E = cosmology.efunc(redshift)  # returns a float
-    z = z + (1 + redshift) / (H0*E) * vz
+    z = z + vz * (1 + redshift) / (H0*E)
     return z % period
 
 
@@ -363,8 +362,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model,
-                   add_rsd=True, use_subhalos=False, N_threads=10):
+def populate_model(halocat, model, add_rsd=True, N_threads=10):
 
     # use halotools HOD
     if model.model_type == 'prebuilt':
@@ -384,74 +382,17 @@ def populate_model(halocat, model,
 
         if hasattr(model, 'mock'):
             # attribute mock present, at least second realisation
-            # halo_table already had N_cut correction
             pass
         else:
             # create dummy mock attribute, using a huge N_cut to save time
             print('Instantiating model.mock using base class zheng07...')
             model.populate_mock(halocat, Num_ptcl_requirement=10000)
-            # replace the halo_table, now using the correct N_cut
-            print('Applying N_cut = {} to table...'.format(model.N_cut))
-            N_halos_0 = len(halocat.halo_table)
-            # 'halo_num_child_particles', 'halo_num_p', 'halo_N', 'halo_alt_N'
-            # are all different fields, only halo_N corresponds to halo_mvir
-            mask = halocat.halo_table['halo_N'] >= model.N_cut
-            N_halos_mcut = np.sum(mask)
-            if use_subhalos:
-                N_halos_scut = N_halos_0
-                pass  # only apply mass cut as mask
-            else:  # drop all subhalos
-                print('Removing subhalos...')
-                mask_sub = halocat.halo_table['halo_upid'] == -1
-                N_halos_scut = np.sum(mask_sub)
-                mask = mask & mask_sub
-            model.mock.halo_table = halocat.halo_table[mask]
-            N_halos = len(model.mock.halo_table)
-
-            print('Total N halos {}; mass cut mask {}; '
-                  'subhalos cut mask {}; final N halos {}.'
-                  .format(N_halos_0, N_halos_mcut, N_halos_scut, N_halos))
-
-            # particle table reduction
-            # either remove unwanted rows or copy wanted rows
-            htab = model.mock.halo_table
-            htab_del = halocat.halo_table[~mask]  # deleted halo rows in htab
-            ind = []
-            if len(htab) > len(htab_del):  # go through rows to delete
-                print('Collecting particle table indices for removal...')
-                ptab = halocat.halo_ptcl_table
-                for i in range(len(htab_del)):
-                    m = htab['halo_subsamp_start'][i]
-                    n = htab['halo_subsamp_len'][i]
-                    ind.append(np.uint64(np.arange(m, m+n)))
-                ind = np.concatenate(ind)
-                print('Initial particle table length {}, removing {} rows...'
-                      .format(len(ptab), len(ind)))
-                ptab.remove_rows(ind)
-            else:  # only copy particles in selected halos
-                print('Collecting particle table indices for copying...')
-                for i in trange(len(htab)):
-                    m = htab['halo_subsamp_start'][i]
-                    n = htab['halo_subsamp_len'][i]
-                    ind.append(np.uint64(np.arange(m, m+n)))
-                ind = np.concatenate(ind)
-                ptab = halocat.halo_ptcl_table[ind]
-
-            # reindex particle meta in halo table
-            htab['halo_subsamp_start'][0] = 0
-            htab['halo_subsamp_start'][1:] = \
-                htab['halo_subsamp_len'].cumsum()[:-1]
-            # verify total particles in halos agree with particle table
-            assert htab['halo_subsamp_len'].sum() == len(ptab)
-            assert (
-                (htab['halo_subsamp_start'][-1] + htab['halo_subsamp_len'][-1])
-                == len(ptab))
-            print('Reduced particle table passes sanity checks.')
-            # assign particle table to mock attribute
-            model.mock.halo_ptcl_table = ptab
-
+            # halo_table already had N_cut correction, just copy tables
+            model.mock.halo_table = halocat.halo_table
+            model.mock.halo_ptcl_table = halocat.halo_ptcl_table
         # generate galaxy catalogue and overwrite model.mock.galaxy_table
-        model = make_galaxies(model, add_rsd=add_rsd)
+        print('Populating {} halos...'.format(len(model.mock.halo_table)))
+        model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
 
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))

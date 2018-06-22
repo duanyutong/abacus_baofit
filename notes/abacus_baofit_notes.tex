@@ -294,7 +294,7 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 
 	\subsection{BOSS DR12 Fitter}
 
-		A recent, functional \href{https://github.com/ashleyjross/LSSanalysis} {fitter} by Ross was used for BOSS DR12 analysis (\cite{boss_dr12_bao}). The fitter takes correlation function data $\xi_0, \xi_2$ in all $(s,\mu)$ bins and the covariance between all bins as input, and evaluates $\chi^2$ on the $(\alpha_\varparallel, \alpha_\perp)$ parameter grid. Theoretically, from Eqn. \ref{eqn:xi_decomp} we have
+		A recent, functional \href{https://github.com/ashleyjross/LSSanalysis} {fitter} by Ross was used for BOSS DR12 analysis (\cite{boss_dr12_bao}). The fitter takes correlation function data $\xi_0, \xi_2$ in all $(s,\mu)$ bins and the covariance between all bins as input, and evaluates $\chi^2$ in the $(\alpha_\varparallel, \alpha_\perp)$ parameter grid. Theoretically, from Eqn. \ref{eqn:xi_decomp} we have
 		\begin{align}
 			\xi_0 (r)
 				&= \frac{1}{2} \int_{-1}^{1} \xi(r, \mu) P_0(\mu) \dif \mu 
@@ -390,7 +390,7 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 				&\times \left[ (\bm{\xi} - \bm{\xi}^\text{fit})^\text{T} C^{-1} (\bm{\xi} - \bm{\xi}^\text{fit}) + \left( \frac{\ln(B_0/\hat{B}_0^\text{bias})}{0.4} \right) ^2
 				+ \left( \frac{\ln(B_2/\hat{B}_0^\text{bias})}{0.4} \right) ^2 \right]
 			\end{align}
-			and minimised to find $(\hat{B_0}, \hat{B_2})$. $B_0$ and $B_2$ are required to be non-negative, otherwise $\chi^2=1000$ is returned. The corresponding $\chi^2 (\hat{B}_0, \hat{B}_2) \vline _{(\alpha_\varparallel, \alpha_\perp)}$ is saved and becomes a point on the $\chi^2 (\alpha_\varparallel, \alpha_\perp)$ grid.
+			and minimised to find $(\hat{B_0}, \hat{B_2})$. $B_0$ and $B_2$ are required to be non-negative, otherwise $\chi^2=1000$ is returned. The corresponding $\chi^2 (\hat{B}_0, \hat{B}_2) \vline _{(\alpha_\varparallel, \alpha_\perp)}$ is saved and becomes a point in the $\chi^2 (\alpha_\varparallel, \alpha_\perp)$ grid.
 		\end{enumerate}
 		
 		We will write a new fitter in the modern style conforming to PEP standards and optimised for performance.

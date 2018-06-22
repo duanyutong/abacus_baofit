@@ -1,4 +1,4 @@
-This is LuaTeX, Version 1.07.0 (MiKTeX 2.9.6600 64-bit)  (format=lualatex 2018.5.15)  7 JUN 2018 01:57
+This is LuaTeX, Version 1.07.0 (MiKTeX 2.9.6600 64-bit)  (format=lualatex 2018.5.15)  7 JUN 2018 02:01
  restricted system commands enabled.
 **abacus_baofit_notes.tex
 (./abacus_baofit_notes.tex
@@ -33,7 +33,7 @@ Inserting `luaotfload.aux.set_capheight' at position 3 in `luaotfload.patch_font
 '.
 Inserting `luaotfload.rewrite_fontname' at position 4 in `luaotfload.patch_font'
 .
-luaotfload | main : initialization completed in 0.422 seconds
+luaotfload | main : initialization completed in 0.417 seconds
 Babel <3.17> and hyphenation patterns for 1 language(s) loaded.
 (./mnras.cls
 Document Class: mnras 2015/05/22\ v3.0\ LaTeX2e MNRAS document class
@@ -2746,7 +2746,7 @@ les/MiKTeX 2.9/fonts/type1/public/txfonts/t1xtt.pfb><C:/Program Files/MiKTeX 2.9
 lic/txfonts/txmia.pfb><C:/Program Files/MiKTeX 2.9/fonts/type1/public/txfonts/tx
 syc.pfb><C:/Program Files/MiKTeX 2.9/fonts/type1/public/newtx/txsys.pfb><C:/Prog
 ram Files/MiKTeX 2.9/fonts/type1/urw/times/utmri8a.pfb>
-Output written on abacus_baofit_notes.pdf (6 pages, 562883 bytes).
+Output written on abacus_baofit_notes.pdf (6 pages, 562882 bytes).
 
 PDF statistics: 360 PDF objects out of 1000 (max. 8388607)
  92 named destinations out of 1000 (max. 131072)
