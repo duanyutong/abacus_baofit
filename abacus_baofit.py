@@ -94,11 +94,6 @@ def vrange(starts, lengths):
     return ret.astype(np.uint64)
 
 
-def sum_lengths(i, len_arr):
-
-    return np.sum(len_arr[i])
-
-
 def find_repeated_entries(arr):
 
     '''
@@ -269,12 +264,25 @@ def make_halocat(phase):
     return halocat
 
 
-def process_halocat(halocat):
+def sum_lengths(i, len_arr):
 
-    # apply mass cut to halos, keeping only relevant child subhalos
-    # reduces 3/4 of workload compared to processing original table
-    # 'halo_num_child_particles', 'halo_num_p', 'halo_N', 'halo_alt_N'
-    # are all different fields, only halo_N corresponds to halo_mvir
+    return np.sum(len_arr[i])
+
+
+def process_rockstar_halocat(halocat, N_cut):
+
+    '''
+    In Rockstar halo catalogues, the subhalo particles are not included in the
+    host halo subsample indices in halo_table. This function applies mass
+    cut (70 particles in AbacusCosmos corresponds to 4e12 Msun), gets rid of
+    all subhalos, and puts all subhalo particles together with their host halo
+    particles in halo_ptcl_table.
+
+    Output halocat has halo_table containing only halos (not subhalos) meeting
+    the masscut, and halo_ptcl_table containing all particles belonging to the
+    halos selected in contiguous blocks.
+
+    '''
     print('Applying mass cut N={} to halocat and re-organising subsamples...'
           .format(N_cut))
     N0 = len(halocat.halo_table)
@@ -291,16 +299,15 @@ def process_halocat(halocat):
     pidx = vrange(htab['halo_subsamp_start'][hidx],
                   htab['halo_subsamp_len'][hidx])
     ptab = halocat.halo_ptcl_table[pidx]
-#    ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
+    # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
     pool = Pool(N_threads)
     ss_len = pool.map(functools.partial(sum_lengths,
                                         len_arr=htab['halo_subsamp_len']),
                       hidx_split)
-    htab = htab[htab['halo_upid'] == -1]  # drop subhalos now
+    htab = htab[htab['halo_upid'] == -1]  # drop subhalos now that ptcl r done
     assert len(htab) == len(hostids)  # sanity check, hostids are unique values
-    # overwrite halo_subsamp_len field to include subhalo particles
     hidx = np.argsort(htab['halo_hostid'])
-    htab['halo_subsamp_len'][hidx] = ss_len
+    htab['halo_subsamp_len'][hidx] = ss_len  # overwrite halo_subsamp_len field
     assert np.sum(htab['halo_subsamp_len']) == len(ptab)
     htab['halo_subsamp_start'][0] = 0  # reindex halo_subsamp_start
     htab['halo_subsamp_start'][1:] = htab['halo_subsamp_len'].cumsum()[:-1]
@@ -308,9 +315,10 @@ def process_halocat(halocat):
             == len(ptab))
     halocat.halo_table = htab
     halocat.halo_ptcl_table = ptab
-    print('Total N halos {}; mass cut mask {}; '
-          'subhalos cut mask {}; final N halos {}.'
+    print('Initial total N halos {}; mass cut mask count {}; '
+          'subhalos cut mask count {}; final N halos {}.'
           .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab)))
+
     return halocat
 
 
@@ -936,11 +944,8 @@ if __name__ == "__main__":
 
 #    halocats = fit_c_median(phases=phases)
     for phase in phases:
-        try:
-            halocat = halocats[phase]
-        except:
-            halocat = make_halocat(phase)
-        halocat = process_halocat(halocat)
+        halocat = make_halocat(phase)
+        halocat = process_rockstar_halocat(halocat, N_cut)
         for model_name in model_names:
             do_realisations(halocat, model_name, N_reals=N_reals)
 #
