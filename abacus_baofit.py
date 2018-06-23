@@ -69,49 +69,6 @@ txtfmt = b'%.30e'
 
 # %% definitionss of statisical formulae
 
-def vrange(starts, lengths):
-    """Create concatenated ranges of integers for multiple start/stop
-
-    Parameters:
-        starts (1-D array_like): starts for each range
-        stops (1-D array_like): stops for each range (same shape as starts)
-
-    Returns:
-        numpy.ndarray: concatenated ranges
-
-    For example:
-
-        >>> starts = [1, 3, 4, 6]
-        >>> lengths = [0, 2, 3, 0]
-        >>> vrange(starts, lengths)
-        array([3, 4, 4, 5, 6])
-
-    """
-    lengths = np.asarray(lengths)
-    stops = starts + lengths
-    ret = (np.repeat(stops - lengths.cumsum(), lengths)
-           + np.arange(lengths.sum()))
-    return ret.astype(np.uint64)
-
-
-def find_repeated_entries(arr):
-
-    '''
-    arr = array([1, 2, 3, 1, 1, 3, 4, 3, 2])
-    ret = [array([0, 3, 4]), array([1, 8]), array([2, 5, 7]), array([6])]
-    '''
-
-    idx_sort = np.argsort(arr)
-    sorted_arr = arr[idx_sort]
-    vals, idx_start = np.unique(sorted_arr, return_index=True,
-                                return_counts=False)
-    # split as sets of indices
-    idx_sort_split = np.split(idx_sort, idx_start[1:])
-    # filter w.r.t their size, keeping only items occurring more than once
-    # vals = vals[count > 1]
-    # ret = filter(lambda x: x.size > 1, res)
-    return vals, idx_sort, idx_sort_split
-
 
 def auto_analytic_random(ND, s_bins, mu_bins, V):
     '''
@@ -264,6 +221,50 @@ def make_halocat(phase):
     return halocat
 
 
+def vrange(starts, lengths):
+
+    '''Create concatenated ranges of integers for multiple start/stop
+    Input:
+        starts (1-D array_like): starts for each range
+        lengths (1-D array_like): lengths for each range (same shape as starts)
+    Returns:
+        numpy.ndarray: concatenated ranges
+
+    For example:
+        >>> starts = [1, 3, 4, 6]
+        >>> lengths = [0, 2, 3, 0]
+        >>> vrange(starts, lengths)
+        array([3, 4, 4, 5, 6])
+
+    '''
+
+    lengths = np.asarray(lengths)
+    stops = starts + lengths
+    ret = (np.repeat(stops - lengths.cumsum(), lengths)
+           + np.arange(lengths.sum()))
+    return ret.astype(np.uint64)
+
+
+def find_repeated_entries(arr):
+
+    '''
+    arr = array([1, 2, 3, 1, 1, 3, 4, 3, 2])
+    idx_sort_split =
+        [array([0, 3, 4]), array([1, 8]), array([2, 5, 7]), array([6])]
+    '''
+
+    idx_sort = np.argsort(arr)  # just the argsort
+    sorted_arr = arr[idx_sort]
+    vals, idx_start = np.unique(sorted_arr, return_index=True,
+                                return_counts=False)
+    # split as sets of indices
+    idx_sort_split = np.split(idx_sort, idx_start[1:])
+    # filter w.r.t their size, keeping only items occurring more than once
+    # vals = vals[count > 1]
+    # ret = filter(lambda x: x.size > 1, res)
+    return vals, idx_sort, idx_sort_split
+
+
 def sum_lengths(i, len_arr):
 
     return np.sum(len_arr[i])
@@ -283,6 +284,7 @@ def process_rockstar_halocat(halocat, N_cut):
     halos selected in contiguous blocks.
 
     '''
+
     print('Applying mass cut N={} to halocat and re-organising subsamples...'
           .format(N_cut))
     N0 = len(halocat.halo_table)
