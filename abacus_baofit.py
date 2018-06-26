@@ -29,14 +29,13 @@ from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'sstest'
-phases = [0]  # range(16)  # [0, 1] # list(range(16))
+tagout = 'subsample'
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
 model_names = ['gen_base3', 'gen_base1', 'gen_base2',
                'gen_ass1', 'gen_ass2', 'gen_ass3']
-model_names = ['gen_base1']
-N_reals = 1  # indices for realisations for an HOD, list of integers
+N_reals = 10  # indices for realisations for an HOD, list of integers
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_threads = 16
 N_sub = 3  # number of subvolumes per dWimension
@@ -297,12 +296,14 @@ def process_rockstar_halocat(halocat, N_cut):
     htab = halocat.halo_table[mask_halo | mask_subhalo]  # original order
     print('Locating relavent halo host ids in halo table...')
     hostids, hidx, hidx_split = find_repeated_entries(htab['halo_hostid'].data)
-    print('Collecting subsample particle indices...')
+    print('Creating subsample particle indices...')
     pidx = vrange(htab['halo_subsamp_start'][hidx],
                   htab['halo_subsamp_len'][hidx])
+    print('Re-arranging particle table...')
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
-    pool = Pool(N_threads)
+    print('Re-writing halo_table subsample fields...')
+    pool = Pool()
     ss_len = pool.map(functools.partial(sum_lengths,
                                         len_arr=htab['halo_subsamp_len']),
                       hidx_split)
@@ -317,6 +318,7 @@ def process_rockstar_halocat(halocat, N_cut):
             == len(ptab))
     halocat.halo_table = htab
     halocat.halo_ptcl_table = ptab
+    pool.close()
     print('Initial total N halos {}; mass cut mask count {}; '
           'subhalos cut mask count {}; final N halos {}.'
           .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab)))
@@ -940,6 +942,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
     pool = Pool(N_threads)
     pool.map(baofit, list_of_inputs)
+    pool.close()
 
 
 if __name__ == "__main__":
@@ -950,9 +953,9 @@ if __name__ == "__main__":
         halocat = process_rockstar_halocat(halocat, N_cut)
         for model_name in model_names:
             do_realisations(halocat, model_name, N_reals=N_reals)
-#
-#    for model_name in model_names:
-#        do_coadd_phases(model_name, coadd_phases=phases)
-#        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
-#
-#    run_baofit_parallel(baofit_phases=phases)
+
+    for model_name in model_names:
+        do_coadd_phases(model_name, coadd_phases=phases)
+        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+
+    run_baofit_parallel(baofit_phases=phases)
