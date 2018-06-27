@@ -105,6 +105,7 @@ def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
     ptab['x_rel'] = ptab['x'] - ptab['halo_x']  # Mpc/h
     ptab['y_rel'] = ptab['y'] - ptab['halo_y']  # Mpc/h
     ptab['z_rel'] = ptab['z'] - ptab['halo_z']  # Mpc/h
+    # r in kpc
     r_rel = np.array([ptab['x_rel'], ptab['y_rel'], ptab['z_rel']]).T*1e3
     ptab['r_centric'] = np.linalg.norm(r_rel, axis=1)  # kpc/h
     # add peculiar velocity and speed columns for bias s_v
@@ -138,7 +139,7 @@ def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
 
     i = 0
     print('Calculating X2 for perihelion ranking...')
-    for i in trange(max_iter):
+    for i in range(max_iter):
         i = i + 1
         Xold = np.sqrt(X2)
         Xold[Xold == 0] = 1  # for cases where X=0, this ensures Xnew = 0
@@ -419,6 +420,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     delta_c = htab['halo_nfw_conc'] - c_median
     A_cen = model.param_dict['A_cen']
     if A_cen != 0:
+        print('Adding assembly bias for centrals...')
         halo_pseudomass_cen = np.int64(
                 halo_m * np.exp(A_cen*(2*(delta_c > 0) - 1)))
         ind_m = halo_m.argsort()
@@ -445,8 +447,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     # create galaxy_table columns to be inherited from halo_table
     # excludes halo_z and halo_vz due to velocity bias and rsd
     col_cen_inh = ['halo_upid', 'halo_id', 'halo_hostid',
-                   'halo_x', 'halo_y',
-                   'halo_vx', 'halo_vy',
+                   'halo_x', 'halo_y', 'halo_z',
+                   'halo_vx', 'halo_vy', 'halo_vz',
                    'halo_klypin_rs', 'halo_nfw_conc', model.halo_m_prop,
                    'N_cen_model', 'N_cen_rand']
     gtab_inh = table.Table([htab[col][mask_cen] for col in col_cen_inh],
@@ -463,6 +465,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_cen = table.hstack([gtab_inh, gtab_new], join_type='exact')
     gtab_cen['gal_type'] = 'centrals'
     print('{} centrals generated.'.format(len(gtab_cen)))
+    # debug
+    gtab_cen.write('/home/dyt/analysis_scripts/gt_centrals.csv')
 
     '''
     satellites
@@ -492,7 +496,9 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    'halo_subsamp_start', 'halo_subsamp_len',
                    'N_cen_model', 'N_cen_rand', 'N_sat_model']
     for col in col_ptc_inh:
-        ptab[col] = np.repeat(htab[col], htab['halo_subsamp_len'])
+        # numpy bug, cannot cast uint64 to int64 for repeat
+        ptab[col] = np.repeat(htab[col],
+                              htab['halo_subsamp_len'].astype(np.int64))
 
     # calculate additional particle quantities for decorations
     process_particle_props(ptab, h, halo_m_prop=model.halo_m_prop)
@@ -505,7 +511,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         # initialise column, astropy doesn't support empty columns
         ptab[key] = np.int32(-1)
     print('Calculating rankings within each halo...')
-    for i in trange(N_halos):
+    for i in range(N_halos):
         m = htab['halo_subsamp_start'][i]
         n = htab['halo_subsamp_len'][i]
         if model.param_dict['s'] != 0:
@@ -545,8 +551,11 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     # create galaxy_table columns to be inherited from particle table
     # all position and velocity columns except z are inherited from particle
     col_sat_inh = list(set(col_ptc_inh + ['x', 'y', 'vx', 'vy', 'vz',
-                                          'v_rad', 'v_tan', 'r_centric',
-                                          'N_sat_model',
+                                          'x_rel', 'y_rel', 'z_rel',
+                                          'vx_pec', 'vy_pec', 'vz_pec',
+                                          'v_rad', 'v_tan',
+                                          'r_centric', 'r_perihelion',
+                                          'N_sat_model', 'N_sat_rand',
                                           'rank_s', 'rank_s_v', 'rank_s_p']))
     gtab_inh = table.Table([ptab[col][mask_sat] for col in col_sat_inh],
                            names=col_sat_inh)
@@ -558,6 +567,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_sat = table.hstack([gtab_inh, gtab_new], join_type='exact')
     gtab_sat['gal_type'] = 'satellites'
     print('{} satellites generated.'.format(len(gtab_sat)))
+    # debug
+    gtab_sat.write('/home/dyt/analysis_scripts/gt_centrals.csv')
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gtab_cen, gtab_sat],
                                            join_type='outer')

@@ -9,7 +9,7 @@ import sys
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/emulator_1100box_planck-gen/' # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-subsample/' # this is the save directory
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin
@@ -329,7 +329,7 @@ def baofit(inputs):
     # define template
     mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
     alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, 
-        amin=1.0, amax=1.04, spar=0.0004, spat=0.0004, fout = fout_tag)
+        amin=1.0, amax=1.2, spar=0.004, spat=0.004, fout = fout_tag)
     print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
     return alrm, altm
 
