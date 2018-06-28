@@ -31,19 +31,18 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'subsample'
-phases = [0]  # range(16)  # [0, 1] # list(range(16))
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base2', 'gen_base3',
                'gen_ass1', 'gen_ass2', 'gen_ass3']
-N_reals = 1  # indices for realisations for an HOD, list of integers
+N_reals = 10  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 16
+N_threads = 8
 N_sub = 3  # number of subvolumes per dWimension
 
 # %% flags
-reuse_galaxies = False
-overwrite_correlation = True
+reuse_galaxies = True
 save_hod_realisation = True
 use_analytic_randoms = True
 use_jackknife = True
@@ -140,7 +139,8 @@ def rebin_smu_counts(cts):
 
     '''
 
-    npairs = savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
+    npairs = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
+    savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
     bins_included = 0
     for m, n in itertools.product(
             range(npairs.shape[0]), range(npairs.shape[1])):
@@ -254,8 +254,8 @@ def vrange(starts, lengths):
         array([3, 4, 4, 5, 6])
 
     '''
-
-    lengths = np.asarray(lengths)
+    starts = np.asarray(starts).astype(np.int64)
+    lengths = np.asarray(lengths).astype(np.int64)
     stops = starts + lengths
     ret = (np.repeat(stops - lengths.cumsum(), lengths)
            + np.arange(lengths.sum()))
@@ -321,7 +321,7 @@ def process_rockstar_halocat(halocat, N_cut):
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
     print('Re-writing halo_table subsample fields...')
-    pool = Pool(N_threads)
+    pool = Pool(16)
     ss_len = pool.map(functools.partial(sum_lengths,
                                         len_arr=htab['halo_subsamp_len']),
                       hidx_split)
@@ -353,8 +353,6 @@ def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
     # Lbox = model.mock.Lbox
     redshift = model.mock.redshift
     model_name = model.model_name
-    print('Auto-correlation pair counting for entire box with {} threads...'
-          .format(N_threads))
     x = model.mock.galaxy_table['x']
     y = model.mock.galaxy_table['y']
     z = model.mock.galaxy_table['z']
@@ -368,12 +366,16 @@ def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
     # not proper datatypes, and will cause indexing issues
     if do_DD:
         if mode == 'smu':
+            print('Auto-correlation smu pair counting for entire box with {}'
+                  ' threads...'.format(N_threads))
             DD = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
                        x, y, z, periodic=True, verbose=False, boxsize=L,
                        output_savg=True, c_api_timer=False)
         elif mode == 'wp':  # also returns wp in addition to counts
+            print('Auto-correlation wp pair counting for entire box with {}'
+                  'threads...'.format(N_threads))
             DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
-                    output_ravg=True, verbose=True, c_api_timer=False)
+                    output_rpavg=True, verbose=False, c_api_timer=False)
         # save counting results as original structured array in npy format
         np.save(os.path.join(filedir,
                              '{}-auto-paircount-DD-{}.npy'
@@ -384,11 +386,11 @@ def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
         ND = len(model.mock.galaxy_table)
         if mode == 'smu':
             _, RR = auto_analytic_random_smu(ND, s_bins, mu_bins, L**3)
-        # save counting results as original structured array in npy format
-        np.savetxt(os.path.join(filedir,
-                                '{}-auto-paircount-RR-{}.txt'
-                                .format(model_name, mode)),
-                   RR, fmt=txtfmt)
+            # save counting results as original structured array in npy format
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-RR-{}.txt'
+                                    .format(model_name, mode)),
+                       RR, fmt=txtfmt)
     if not use_analytic_randoms or debug_mode:
         if mode == 'smu':
             ND = len(model.mock.galaxy_table)
@@ -785,14 +787,13 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
     print('Monoquad covariance matrix saved to: ', filepath)
 
 
-def do_realisations(phase, model_name, halocat=None, N_reals=16):
+def do_realisations(model_name, phase, halocat=None, N_reals=16):
 
     '''
     generates n HOD realisations for a given (phase, model)
     then co-add them and get a single set of xi data
     the rest of the programme will work as if there is only 1 realisation
     '''
-
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     # create n_real realisations of the given HOD model
     xi_s_mu_list = []
@@ -809,18 +810,19 @@ def do_realisations(phase, model_name, halocat=None, N_reals=16):
                  for fn in filenames]
         if np.all([os.path.isfile(path) for path in paths]):
             return None  # all output files exist, skip this realisation
-        if halocat is None or halocat.ZD_Seed != phase:
-            halocat = make_halocat(phase)
-            halocat = process_rockstar_halocat(halocat, N_cut)
-        else:
-            assert halocat.ZD_Seed == phase  # re-use the input halocat
+#        if halocat is None or halocat.ZD_Seed != phase:
+#            halocat = make_halocat(phase)
+#            halocat = process_rockstar_halocat(halocat, N_cut)
+#        else:
+        assert halocat.ZD_Seed == phase  # re-use the input halocat
         model = initialise_model(halocat.redshift, model_name,
                                  halo_m_prop=halo_m_prop)
         model.N_cut = N_cut
         model.c_median_poly = np.poly1d(
                 np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
         model.r = r  # add useful model properties here
-        if not reuse_galaxies or not os.path.isfile(paths[0]):
+        if not reuse_galaxies or not np.all(
+                [os.path.isfile(path) for path in paths]):
             print('---\n'
                   'Generating {} of {} realisations for model {} ...\n'
                   '---'
@@ -854,28 +856,20 @@ def do_realisations(phase, model_name, halocat=None, N_reals=16):
                     os.makedirs(os.path.dirname(paths[0]))
                 model.mock.galaxy_table.write(
                         paths[0], format='ascii.fast_csv', overwrite=True)
+
+            do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
+            do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
+            xi_s_mu, xi_0, xi_2 = do_auto_correlation(model)
+            do_subcross_correlation(model, N_sub=N_sub)
+            do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
+            wp = do_auto_correlation(model, mode='wp')
         else:  # reuse existing galaxy table
             print('---\n'
                   'Galaxy table {} of {} realisations for model {} exists. \n'
                   '---'
                   .format(r+1, N_reals, model_name))
-        # if all smu file exists and we do not want to overwrite them
-        if (np.all([os.path.isfile(path) for path in paths[1:4]]) and
-                not overwrite_correlation):
-            print('Reading xi(s, mu) and l = 0, 2 multipoles...')
-            xi_s_mu, xi_0, xi_2 = [
-                    np.loadtxt(path) for path in paths[1:4]]
-        else:  # do smu counts and correlation function
-            do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
-            do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
-            xi_s_mu, xi_0, xi_2 = do_auto_correlation(model)
-            do_subcross_correlation(model, N_sub=N_sub)
-        if os.path.isfile(paths[4]) and not overwrite_correlation:
-            print('Reading wp(rp)...')
-            wp = np.loadtxt(paths[4])  # wp txt file exists
-        else:  # need to do wp counts and correlation function
-            do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
-            wp = do_auto_correlation(model, mode='wp')
+            print('Reading xi(s, mu), l = 0, 2 multipoles and wp...')
+            xi_s_mu, xi_0, xi_2, wp = [np.loadtxt(path) for path in paths[1:]]
 
         # collect auto-xi to coadd all realisations for the current phase
         xi_s_mu_list.append(xi_s_mu)
@@ -996,12 +990,19 @@ if __name__ == "__main__":
         try:
             cat = halocats[phase]
         except NameError:
-            cat = None
-        for model_name in model_names:
-            do_realisations(phase, model_name, halocat=cat, N_reals=N_reals)
+            cat = make_halocat(phase)
+            cat = process_rockstar_halocat(cat, N_cut)
+        pool = Pool(3)
+        pool.map(functools.partial(do_realisations,
+                                   phase=phase, halocat=cat, N_reals=N_reals),
+                 model_names)
+        pool.close()
+#        for model_name in model_names:
+#            cat = do_realisations(phase, model_name,
+#                                  halocat=cat, N_reals=N_reals)
 
     for model_name in model_names:
         do_coadd_phases(model_name, coadd_phases=phases)
         do_cov(model_name, N_sub=N_sub, cov_phases=phases)
 
-    run_baofit_parallel(baofit_phases=[0])
+    run_baofit_parallel(baofit_phases=phases)

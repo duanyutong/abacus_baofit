@@ -98,7 +98,7 @@ def do_rsd(z, vz, redshift, cosmology, period):
 
 
 def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
-                           max_iter=30, precision=0.1):
+                           max_iter=10, precision=0.1):
 
     print('Processing particle table properties...')
     # add host_centric_distance for all particles for bias s
@@ -437,7 +437,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     # this operation should be fast enough, no skip needed
     vz = do_vpec(htab['halo_vz'][mask_cen], htab['halo_vrms'][mask_cen],
                  model.param_dict['alpha_c'])
-    # at last, add observational rsd for halos
+    # add observational rsd for halos
     if add_rsd:
         z = do_rsd(htab['halo_z'][mask_cen]/h, vz, model.mock.redshift,
                    model.mock.cosmology, model.mock.BoxSize/h) * h  # in Mpc/h
@@ -466,7 +466,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_cen['gal_type'] = 'centrals'
     print('{} centrals generated.'.format(len(gtab_cen)))
     # debug
-    gtab_cen.write('/home/dyt/analysis_scripts/gt_centrals.csv')
+    gtab_cen.write('/home/dyt/analysis_scripts/gt_centrals.csv',
+                   overwrite=True)
 
     '''
     satellites
@@ -568,7 +569,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_sat['gal_type'] = 'satellites'
     print('{} satellites generated.'.format(len(gtab_sat)))
     # debug
-    gtab_sat.write('/home/dyt/analysis_scripts/gt_centrals.csv')
+    gtab_sat.write('/home/dyt/analysis_scripts/gt_satellites.csv',
+                   overwrite=True)
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gtab_cen, gtab_sat],
                                            join_type='outer')

@@ -329,7 +329,7 @@ def baofit(inputs):
     # define template
     mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
     alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, 
-        amin=1.0, amax=1.2, spar=0.004, spat=0.004, fout = fout_tag)
+        amin=1.0, amax=1.4, spar=0.0004, spat=0.0004, fout = fout_tag)
     print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
     return alrm, altm
 
