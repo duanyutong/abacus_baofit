@@ -21,7 +21,7 @@ from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
 # from multiprocessing import Pool
-from tqdm import trange
+# from tqdm import trange
 # from functools import partial
 
 
@@ -329,12 +329,12 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         model.param_dict['logM1'] = 13.8
         model.param_dict['alpha'] = 1
         # decoration parameters
-        model.param_dict['s'] = 0
-        model.param_dict['s_v'] = 0
-        model.param_dict['s_p'] = 0
-        model.param_dict['alpha_c'] = 0
-        model.param_dict['A_cen'] = 0
-        model.param_dict['A_sat'] = 0
+        model.param_dict['s'] = 0  # sat ranking by halo centric distance
+        model.param_dict['s_v'] = 0  # sat ranking by relative speed
+        model.param_dict['s_p'] = 0  # sat ranking perihelion distance
+        model.param_dict['alpha_c'] = 0  # centrals velocity bias
+        model.param_dict['A_cen'] = 0  # centrals assembly bias, pseudomass
+        model.param_dict['A_sat'] = 0  # satellites assembly bias, pseudomass
 
         if model_name == 'gen_base2':
             model.param_dict['logM1'] = 13.85
@@ -342,6 +342,12 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         elif model_name == 'gen_base3':
             model.param_dict['logM1'] = 13.9
             model.param_dict['alpha'] = 1.663
+        elif model_name == 'gen_base4':
+            model.param_dict['logM1'] = 13.796
+            model.param_dict['alpha'] = 0.95
+        elif model_name == 'gen_base5':
+            model.param_dict['logM1'] = 13.805
+            model.param_dict['alpha'] = 1.05
         elif model_name == 'gen_ass1':
             model.param_dict['A_cen'] = 1
             model.param_dict['A_sat'] = 0
@@ -351,6 +357,8 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         elif model_name == 'gen_ass3':
             model.param_dict['A_cen'] = 1
             model.param_dict['A_sat'] = 1
+        elif model_name == 'gen_vel1':
+            model.param_dict['alpha_c'] = 2
 
     #  add useful model properties here
     model.model_name = model_name
@@ -404,8 +412,8 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
 def make_galaxies(model, add_rsd=True, N_threads=10):
 
     h = (model.mock.cosmology.H0/100).value
-    htab = model.mock.halo_table  # make a convenient copy of halo table
-    N_halos = len(htab)  # total number of halos available
+    htab = model.mock.halo_table
+    N_halos = len(htab)  # total number of host halos available
     # remove existing galaxy table, because modifying it is too painfully slow
     if hasattr(model.mock, 'galaxy_table'):
         del model.mock.galaxy_table
@@ -465,9 +473,6 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_cen = table.hstack([gtab_inh, gtab_new], join_type='exact')
     gtab_cen['gal_type'] = 'centrals'
     print('{} centrals generated.'.format(len(gtab_cen)))
-    # debug
-    gtab_cen.write('/home/dyt/analysis_scripts/gt_centrals.csv',
-                   overwrite=True)
 
     '''
     satellites
@@ -568,9 +573,6 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     gtab_sat = table.hstack([gtab_inh, gtab_new], join_type='exact')
     gtab_sat['gal_type'] = 'satellites'
     print('{} satellites generated.'.format(len(gtab_sat)))
-    # debug
-    gtab_sat.write('/home/dyt/analysis_scripts/gt_satellites.csv',
-                   overwrite=True)
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gtab_cen, gtab_sat],
                                            join_type='outer')

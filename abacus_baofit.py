@@ -36,9 +36,10 @@ cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.7  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base2', 'gen_base3',
                'gen_ass1', 'gen_ass2', 'gen_ass3']
+model_names = ['gen_base4', 'gen_base5', 'gen_vel1']
 N_reals = 10  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 8
+N_threads = 8  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dWimension
 
 # %% flags
@@ -647,53 +648,42 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
 
 
 def do_coadd_phases(model_name, coadd_phases=range(16)):
-
+    
+    print('Coadding xi from all phases for model {}...'.format(model_name))
     xi_list_phases = []
     xi_0_list_phases = []
     xi_2_list_phases = []
+    wp_list_phases = []
 
     for phase in coadd_phases:
 
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-        path_prefix = os.path.join(save_dir, sim_name, 'z{}'.format(redshift),
-                                   model_name + '-auto-')
-        path_xi = path_prefix + 'xi_s_mu.txt'
-        path_xi_0 = path_prefix + 'xi_0.txt'
-        path_xi_2 = path_prefix + 'xi_2.txt'
+        fintags = ['xi_s_mu-ca', 'xi_0-ca', 'xi_2-ca', 'wp-ca']
+        path_xi, path_xi_0, path_xi_2, path_wp = [
+                os.path.join(save_dir, sim_name, 'z{}'.format(redshift),
+                             '{}-auto-{}.txt'.format(model_name, t))
+                for t in fintags]
         xi_list_phases.append(np.loadtxt(path_xi))
         xi_0_list_phases.append(np.loadtxt(path_xi_0))
         xi_2_list_phases.append(np.loadtxt(path_xi_2))
+        wp_list_phases.append(np.loadtxt(path_wp))
     # create save dir
     filedir = os.path.join(
         save_dir,
-        sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
+        sim_name_prefix + '_' + str(cosmology).zfill(2) + '-coadd',
         'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
     # perform coadding for two cases
-    # print('Coadding xi for all phases, without dropping any...')
-    xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err = \
-        coadd_xi_list(xi_list_phases, xi_0_list_phases, xi_2_list_phases)
-    # print('Saving coadded xi texts...')
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_s_mu-coadd.txt'.format(model_name)),
-        xi_s_mu_ca, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_s_mu-coadd_err.txt'.format(model_name)),
-        xi_s_mu_err, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_0-coadd.txt'.format(model_name)),
-        xi_0_ca, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_0-coadd_err.txt'.format(model_name)),
-        xi_0_err, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_2-coadd.txt'.format(model_name)),
-        xi_2_ca, fmt=txtfmt)
-    np.savetxt(os.path.join(
-            filedir, '{}-auto-xi_2-coadd_err.txt'.format(model_name)),
-        xi_2_err, fmt=txtfmt)
-
+    outputs = coadd_xi_list([xi_list_phases, xi_0_list_phases, 
+                                        xi_2_list_phases, wp_list_phases])
+    fouttags = [
+        'xi_s_mu-ca', 'xi_s_mu-err', 'xi_0-ca', 'xi_0-err',
+        'xi_2-ca',    'xi_2-err',    'wp-ca',   'wp-err']
+    for output, fouttag in zip(outputs, fouttags):
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-{}.txt'.format(model_name, fouttag)),
+                   output, fmt=txtfmt)
     if use_jackknife:
         for phase in coadd_phases:
             # print('Jackknife coadding xi, dropping phase {}...'
@@ -701,35 +691,13 @@ def do_coadd_phases(model_name, coadd_phases=range(16)):
             xi_list = xi_list_phases[:phase] + xi_list_phases[phase+1:]
             xi_0_list = xi_0_list_phases[:phase] + xi_0_list_phases[phase+1:]
             xi_2_list = xi_2_list_phases[:phase] + xi_2_list_phases[phase+1:]
-            # print('For phase {}, # phases selected: {}, {}, {}'
-            #      .format(phase, len(xi_list),
-            #              len(xi_0_list), len(xi_2_list)))
-            xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err = \
-                coadd_xi_list(xi_list, xi_0_list, xi_2_list)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_s_mu-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_s_mu_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_s_mu-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_s_mu_err, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_0-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_0_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_0-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_0_err, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_2-coadd_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_2_ca, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir, '{}-auto-xi_2-coadd_err_jackknife_{}.txt'
-                    .format(model_name, phase)),
-                xi_2_err, fmt=txtfmt)
+            wp_list = wp_list_phases[:phase] + wp_list_phases[phase+1:]
+            outputs = coadd_xi_list([xi_list, xi_0_list, xi_2_list, wp_list])
+            for output, fouttag in zip(outputs, fouttags):
+                np.savetxt(os.path.join(filedir,
+                                        '{}-auto-{}-jackknife_{}.txt'
+                                        .format(model_name, fouttag, phase)),
+                           output, fmt=txtfmt)
 
 
 def do_cov(model_name, N_sub=3, cov_phases=range(16)):
@@ -742,24 +710,19 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
             paths = paths + glob(os.path.join(
                         save_dir, sim_name, 'z{}-r*'.format(redshift),
                         '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
-        print('Calculating covariance matrix using {} xi samples from all'
-              ' phases for l = {}...'
-              .format(len(paths), ell))
         # read in all xi files for all phases
         xi_list = [np.loadtxt(path)[:, 1] for path in paths]
         # as cov gets smaller, chisq gets bigger, contour gets smaller
         cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
         # save cov
-        filepath = os.path.join(  # save to '-combined' folder for all phases
+        filepath = os.path.join(  # save to coadd folder for all phases
                 save_dir,
-                sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
+                sim_name_prefix + '_' + str(cosmology).zfill(2) + '-coadd',
                 'z{}'.format(redshift),
                 '{}-cross-xi_{}-cov.txt'.format(model_name, ell))
         np.savetxt(filepath, cov, fmt=txtfmt)
-        print('l = {} covariance matrix saved to: {}'.format(ell, filepath))
 
     # calculate monoquad cov for baofit
-    print('Calculating combined mono-quad covariance matrix...')
     xi_list = []
     for phase in phases:
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -778,13 +741,13 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
             xi_list.append(np.hstack((xi_0, xi_2)))
     cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
     # save cov
-    filepath = os.path.join(  # save to '-combined' folder for all phases
+    filepath = os.path.join(  # save to coadd folder for all phases
             save_dir,
-            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
+            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-coadd',
             'z{}'.format(redshift),
             '{}-cross-xi_monoquad-cov.txt'.format(model_name, ell))
     np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
-    print('Monoquad covariance matrix saved to: ', filepath)
+    # print('Monoquad covariance matrix saved to: ', filepath)
 
 
 def do_realisations(model_name, phase, halocat=None, N_reals=16):
@@ -803,7 +766,7 @@ def do_realisations(model_name, phase, halocat=None, N_reals=16):
     for r in range(N_reals):
         # check if files exist in the realisation directory
         filenames = ['galaxy_table.csv', 'auto-xi_s_mu.txt',
-                     'auto-xi_0.txt', 'auto-xi_2.txt', 'auto_wp.txt']
+                     'auto-xi_0.txt', 'auto-xi_2.txt', 'auto-wp.txt']
         paths = [os.path.join(save_dir, sim_name,
                               'z{}-r{}'.format(redshift, r),
                               '{}-{}'.format(model_name, fn))
@@ -853,7 +816,10 @@ def do_realisations(model_name, phase, halocat=None, N_reals=16):
             if save_hod_realisation:
                 print('Saving galaxy table to: {} ...'.format(paths[0]))
                 if not os.path.exists(os.path.dirname(paths[0])):
-                    os.makedirs(os.path.dirname(paths[0]))
+                    try:
+                        os.makedirs(os.path.dirname(paths[0]))
+                    except OSError:
+                        pass
                 model.mock.galaxy_table.write(
                         paths[0], format='ascii.fast_csv', overwrite=True)
 
@@ -963,22 +929,22 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
     filedir = os.path.join(
             save_dir,
-            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-combined',
+            sim_name_prefix + '_' + str(cosmology).zfill(2) + '-coadd',
             'z{}'.format(redshift))
     list_of_inputs = []
     for model_name in model_names:
         for phase in baofit_phases:  # list of inputs for parallelisation
             path_xi_0 = os.path.join(filedir,
-                                     '{}-auto-xi_0-coadd_jackknife_{}.txt'
+                                     '{}-auto-xi_0-ca-jackknife_{}.txt'
                                      .format(model_name, phase))
             path_xi_2 = os.path.join(filedir,
-                                     '{}-auto-xi_2-coadd_jackknife_{}.txt'
+                                     '{}-auto-xi_2-ca-jackknife_{}.txt'
                                      .format(model_name, phase))
             path_cov = os.path.join(filedir, '{}-cross-xi_monoquad-cov.txt'
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    pool = Pool(N_threads)
+    pool = Pool(2*N_threads)
     pool.map(baofit, list_of_inputs)
     pool.close()
 
@@ -997,12 +963,12 @@ if __name__ == "__main__":
                                    phase=phase, halocat=cat, N_reals=N_reals),
                  model_names)
         pool.close()
-#        for model_name in model_names:
-#            cat = do_realisations(phase, model_name,
-#                                  halocat=cat, N_reals=N_reals)
+        for model_name in model_names:
+            cat = do_realisations(phase, model_name,
+                                  halocat=cat, N_reals=N_reals)
 
     for model_name in model_names:
-        do_coadd_phases(model_name, coadd_phases=phases)
-        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+        do_coadd_phases(model_name, coadd_phases=range(16))
+        do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
 
-    run_baofit_parallel(baofit_phases=phases)
+    run_baofit_parallel(baofit_phases=range(16))
