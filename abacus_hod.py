@@ -17,12 +17,38 @@ from __future__ import (
         absolute_import, division, print_function, unicode_literals)
 # import os
 import numpy as np
+from multiprocessing import Pool
+# from concurrent.futures import ProcessPoolExecutor as Pool
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
 # from multiprocessing import Pool
 # from tqdm import trange
 # from functools import partial
+
+
+def vrange(starts, lengths):
+
+    '''Create concatenated ranges of integers for multiple start/stop
+    Input:
+        starts (1-D array_like): starts for each range
+        lengths (1-D array_like): lengths for each range (same shape as starts)
+    Returns:
+        numpy.ndarray: concatenated ranges
+
+    For example:
+        >>> starts = [1, 3, 4, 6]
+        >>> lengths = [0, 2, 3, 0]
+        >>> vrange(starts, lengths)
+        array([3, 4, 4, 5, 6])
+
+    '''
+    starts = np.asarray(starts).astype(np.int64)
+    lengths = np.asarray(lengths).astype(np.int64)
+    stops = starts + lengths
+    ret = (np.repeat(stops - lengths.cumsum(), lengths)
+           + np.arange(lengths.sum()))
+    return ret.astype(np.uint64)
 
 
 def N_cen_mean(M, param_dict):
@@ -73,7 +99,7 @@ def do_vpec(vz, vrms, alpha_c):
     # draw from normal distribution and add peculiar velocity in LOS direction
     # for central galaxies
     # has width = vrms/sqrt(3) * alpha_c
-    vpec = np.random.normal(loc=0, scale=vrms/np.sqrt(3)*alpha_c)
+    vpec = np.random.normal(loc=0, scale=vrms/np.sqrt(3)*np.abs(alpha_c))
     return vz + vpec
 
 
@@ -95,6 +121,27 @@ def do_rsd(z, vz, redshift, cosmology, period):
     E = cosmology.efunc(redshift)  # returns a float
     z = z + vz * (1 + redshift) / (H0*E)
     return z % period
+
+
+def rank_halo_particles(arr):
+    return arr.argsort()[::-1].argsort()
+
+
+def rank_particles_by_halo(arr_split):
+    '''
+    input split array consists of properties of each particle within a halo
+    grouped/split by halo, e.g.
+    arr_split = [array([], dtype=uint64),
+                 array([0], dtype=uint64),
+                 array([1, 2], dtype=uint64),
+                 array([3, 4, 5], dtype=uint64),
+                 array([6, 7, 8, 9], dtype=uint64)]
+    Properties can be r_centric, v_pec, or r_perihelion to be sorted
+    Returns ranking of particles, concatinated
+    '''
+    pool = Pool(10)
+    rank = pool.map(rank_halo_particles, list(arr_split))
+    return np.concatenate(rank)
 
 
 def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
@@ -335,7 +382,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         model.param_dict['alpha_c'] = 0  # centrals velocity bias
         model.param_dict['A_cen'] = 0  # centrals assembly bias, pseudomass
         model.param_dict['A_sat'] = 0  # satellites assembly bias, pseudomass
-
+        ''' BOOKKEEPING: DONT MODIFY EXISTING MODELS, CREATE NEW ONES '''
         if model_name == 'gen_base2':
             model.param_dict['logM1'] = 13.85
             model.param_dict['alpha'] = 1.377
@@ -357,10 +404,45 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         elif model_name == 'gen_ass3':
             model.param_dict['A_cen'] = 1
             model.param_dict['A_sat'] = 1
+        elif model_name == 'gen_ass1_n':
+            model.param_dict['A_cen'] = -1
+            model.param_dict['A_sat'] = 0
+        elif model_name == 'gen_ass2_n':
+            model.param_dict['A_cen'] = 0
+            model.param_dict['A_sat'] = -1
+        elif model_name == 'gen_ass3_n':
+            model.param_dict['A_cen'] = -1
+            model.param_dict['A_sat'] = -1
         elif model_name == 'gen_vel1':
-            model.param_dict['alpha_c'] = 2
+            model.param_dict['alpha_c'] = 1
+        elif model_name == 'gen_s1':
+            model.param_dict['s'] = 1
+        elif model_name == 'gen_sv1':
+            model.param_dict['s_v'] = 1
+        elif model_name == 'gen_sp1':
+            model.param_dict['s_p'] = 1
+        elif model_name == 'gen_s1_n':
+            model.param_dict['s'] = -1
+        elif model_name == 'gen_sv1_n':
+            model.param_dict['s_v'] = -1
+        elif model_name == 'gen_sp1_n':
+            model.param_dict['s_p'] = -1
+        elif model_name == 'gen_allbiases':
+            model.param_dict['A_cen'] = 1
+            model.param_dict['A_sat'] = 1
+            model.param_dict['alpha_c'] = 1
+            model.param_dict['s'] = 1
+            model.param_dict['s_v'] = 1
+            model.param_dict['s_p'] = 1
+        elif model_name == 'gen_allbiases_n':
+            model.param_dict['A_cen'] = -1
+            model.param_dict['A_sat'] = -1
+            model.param_dict['alpha_c'] = 1
+            model.param_dict['s'] = -1
+            model.param_dict['s_v'] = -1
+            model.param_dict['s_p'] = -1
 
-    #  add useful model properties here
+    # add useful model properties here
     model.model_name = model_name
     if 'gen' in model_name:
         model.model_type = 'general'
@@ -489,7 +571,6 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         halo_m = halo_m[ind_m][ind_pm]
     htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict) \
         / htab['halo_subsamp_len']
-
     print('Creating inherited halo properties in particle table...')
     ptab = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_particles = len(ptab)
@@ -505,10 +586,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         # numpy bug, cannot cast uint64 to int64 for repeat
         ptab[col] = np.repeat(htab[col],
                               htab['halo_subsamp_len'].astype(np.int64))
-
     # calculate additional particle quantities for decorations
     process_particle_props(ptab, h, halo_m_prop=model.halo_m_prop)
-
     # particle table complete. onto satellite generation
     # calculate satellite probablity and generate random numbers
     ptab['N_sat_rand'] = np.random.random(N_particles)
@@ -516,20 +595,45 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
         ptab[key] = np.int32(-1)
-    print('Calculating rankings within each halo...')
-    for i in range(N_halos):
-        m = htab['halo_subsamp_start'][i]
-        n = htab['halo_subsamp_len'][i]
-        if model.param_dict['s'] != 0:
-            # furtherst particle has lowest rank, 0, inner most N-1
-            ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
-                                    .argsort()[::-1].argsort()
-        if model.param_dict['s_v'] != 0:
-            ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
-                                      .argsort()[::-1].argsort()
-        if model.param_dict['s_p'] != 0:
-            ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
-                                      .argsort()[::-1].argsort()
+    print('Creating particle indices...')
+    pidx = vrange(htab['halo_subsamp_start'].data,
+                  htab['halo_subsamp_len'].data)
+    # splited arrays by halos, becomes iterable for MP
+    if model.param_dict['s'] != 0:
+        r_centric = ptab['r_centric'][pidx].data
+        print('Splitting data array by halos...')
+        r_centric_split = np.split(r_centric,
+                                   htab['halo_subsamp_start'].data[1:])
+        print('Calculating halo centric distance rankings with MP...')
+        ptab['rank_s'] = rank_particles_by_halo(r_centric_split)
+    if model.param_dict['s_v'] != 0:
+        v_pec = ptab['v_pec'][pidx]
+        print('Splitting data array by halos...')
+        v_pec_split = np.split(v_pec, htab['halo_subsamp_start'].data[1:])
+        print('Calculating peculiar speed rankings with MP...')
+        ptab['rank_s_v'] = rank_particles_by_halo(v_pec_split)
+    if model.param_dict['s_p'] != 0:
+        r_perihelion = ptab['r_perihelion'][pidx]
+        print('Splitting data array by halos...')
+        r_perihelion_split = np.split(r_perihelion,
+                                      htab['halo_subsamp_start'].data[1:])
+        print('Calculating perihelion distance rankings with MP...')
+        ptab['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
+
+#    for i in range(N_halos):
+#        m = htab['halo_subsamp_start'][i]
+#        n = htab['halo_subsamp_len'][i]
+#        if model.param_dict['s'] != 0:
+#            # furtherst particle has lowest rank, 0, innermost N-1
+#            ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
+#                                    .argsort()[::-1].argsort()
+#        if model.param_dict['s_v'] != 0:
+#            ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
+#                                      .argsort()[::-1].argsort()
+#        if model.param_dict['s_p'] != 0:
+#            ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
+#                                      .argsort()[::-1].argsort()
+
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     ptab['N_sat_model'] = (
