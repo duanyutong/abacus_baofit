@@ -15,16 +15,13 @@ halo/galaxy/particle tables have the following default units:
 
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
-# import os
+from contextlib import closing
 import numpy as np
 from multiprocessing import Pool
-# from concurrent.futures import ProcessPoolExecutor as Pool
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
-# from multiprocessing import Pool
 # from tqdm import trange
-# from functools import partial
 
 
 def vrange(starts, lengths):
@@ -124,6 +121,7 @@ def do_rsd(z, vz, redshift, cosmology, period):
 
 
 def rank_halo_particles(arr):
+
     return arr.argsort()[::-1].argsort()
 
 
@@ -139,8 +137,8 @@ def rank_particles_by_halo(arr_split):
     Properties can be r_centric, v_pec, or r_perihelion to be sorted
     Returns ranking of particles, concatinated
     '''
-    pool = Pool(10)
-    rank = pool.map(rank_halo_particles, list(arr_split))
+    with closing(Pool(3)) as p:
+        rank = p.map(rank_halo_particles, list(arr_split))
     return np.concatenate(rank)
 
 
@@ -571,6 +569,8 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         halo_m = halo_m[ind_m][ind_pm]
     htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict) \
         / htab['halo_subsamp_len']
+    # # fix inf due to dividing by zero
+    # htab['N_sat_model'][htab['halo_subsamp_len'] == 0] = 0
     print('Creating inherited halo properties in particle table...')
     ptab = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_particles = len(ptab)
@@ -582,7 +582,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    'halo_klypin_rs', 'halo_nfw_conc', model.halo_m_prop,
                    'halo_subsamp_start', 'halo_subsamp_len',
                    'N_cen_model', 'N_cen_rand', 'N_sat_model']
-    for col in col_ptc_inh:
+    for col in list(set(col_ptc_inh)):
         # numpy bug, cannot cast uint64 to int64 for repeat
         ptab[col] = np.repeat(htab[col],
                               htab['halo_subsamp_len'].astype(np.int64))
@@ -596,25 +596,25 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         # initialise column, astropy doesn't support empty columns
         ptab[key] = np.int32(-1)
     print('Creating particle indices...')
+    # splited arrays by halos, becomes iterable for MP
     pidx = vrange(htab['halo_subsamp_start'].data,
                   htab['halo_subsamp_len'].data)
-    # splited arrays by halos, becomes iterable for MP
     if model.param_dict['s'] != 0:
         r_centric = ptab['r_centric'][pidx].data
-        print('Splitting data array by halos...')
+        print('Splitting r_centric data array by halos...')
         r_centric_split = np.split(r_centric,
                                    htab['halo_subsamp_start'].data[1:])
         print('Calculating halo centric distance rankings with MP...')
         ptab['rank_s'] = rank_particles_by_halo(r_centric_split)
     if model.param_dict['s_v'] != 0:
         v_pec = ptab['v_pec'][pidx]
-        print('Splitting data array by halos...')
+        print('Splitting v_pec data array by halos...')
         v_pec_split = np.split(v_pec, htab['halo_subsamp_start'].data[1:])
         print('Calculating peculiar speed rankings with MP...')
         ptab['rank_s_v'] = rank_particles_by_halo(v_pec_split)
     if model.param_dict['s_p'] != 0:
         r_perihelion = ptab['r_perihelion'][pidx]
-        print('Splitting data array by halos...')
+        print('Splitting r_perihelion data array by halos...')
         r_perihelion_split = np.split(r_perihelion,
                                       htab['halo_subsamp_start'].data[1:])
         print('Calculating perihelion distance rankings with MP...')
