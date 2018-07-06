@@ -17,7 +17,6 @@ from __future__ import (
         absolute_import, division, print_function, unicode_literals)
 import numpy as np
 # from multiprocessing import Pool
-# from contextlib import closing
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
@@ -266,7 +265,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
 
     '''
 
-    print('Initialising HOD model: {}...'.format(model_name))
+    # print('Initialising HOD model: {}...'.format(model_name))
 
     # halotools prebiult models
     if model_name == 'zheng07':
@@ -474,7 +473,7 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
             pass
         else:
             # create dummy mock attribute, using a huge N_cut to save time
-            print('Instantiating model.mock using base class zheng07...')
+            # print('Instantiating model.mock using base class zheng07...')
             model.populate_mock(halocat, Num_ptcl_requirement=10000)
             # halo_table already had N_cut correction, just copy tables
             model.mock.halo_table = halocat.halo_table
@@ -571,7 +570,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         / htab['halo_subsamp_len']
     # # fix inf due to dividing by zero
     # htab['N_sat_model'][htab['halo_subsamp_len'] == 0] = 0
-    print('Creating inherited halo properties in particle table...')
+    print('Creating inherited halo properties for centrals...')
     ptab = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_particles = len(ptab)
     # inherite columns from halo talbe and add to particle table
@@ -595,10 +594,11 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
         ptab[key] = np.int32(-1)
-    print('Creating particle indices...')
-    # splited arrays by halos, becomes iterable for MP
+
+    # print('Creating particle indices...')
     # pidx = vrange(htab['halo_subsamp_start'].data,
     #               htab['halo_subsamp_len'].data)
+    # splited arrays by halos, becomes iterable for MP
     # if model.param_dict['s'] != 0:
     #     r_centric = ptab['r_centric'][pidx].data
     #     print('Splitting r_centric data array by halos...')
@@ -619,19 +619,20 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     #                                   htab['halo_subsamp_start'].data[1:])
     #     print('Calculating perihelion distance rankings with MP...')
     #     ptab['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
+    print('Ranking particles within each halo for r = {} ...'.format(model.r))
     for i in range(N_halos):
         m = htab['halo_subsamp_start'][i]
         n = htab['halo_subsamp_len'][i]
         if model.param_dict['s'] != 0:
             # furtherst particle has lowest rank, 0, innermost N-1
             ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
-                                    .argsort()[::-1].argsort()
+                .argsort()[::-1].argsort()
         if model.param_dict['s_v'] != 0:
             ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
-                                      .argsort()[::-1].argsort()
+                .argsort()[::-1].argsort()
         if model.param_dict['s_p'] != 0:
             ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
-                                      .argsort()[::-1].argsort()
+                .argsort()[::-1].argsort()
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     ptab['N_sat_model'] = (
@@ -655,6 +656,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    model.mock.BoxSize/h) * h  # in Mpc/h
     else:
         z = ptab['z'][mask_sat]
+    print('Creating inherited halo properties for satellites...')
     # satellite calculation done, create satellites table
     # create galaxy_table columns to be inherited from particle table
     # all position and velocity columns except z are inherited from particle
