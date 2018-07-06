@@ -15,9 +15,9 @@ halo/galaxy/particle tables have the following default units:
 
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
-from contextlib import closing
 import numpy as np
-from multiprocessing import Pool
+# from multiprocessing import Pool
+# from contextlib import closing
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
@@ -125,21 +125,21 @@ def rank_halo_particles(arr):
     return arr.argsort()[::-1].argsort()
 
 
-def rank_particles_by_halo(arr_split):
-    '''
-    input split array consists of properties of each particle within a halo
-    grouped/split by halo, e.g.
-    arr_split = [array([], dtype=uint64),
-                 array([0], dtype=uint64),
-                 array([1, 2], dtype=uint64),
-                 array([3, 4, 5], dtype=uint64),
-                 array([6, 7, 8, 9], dtype=uint64)]
-    Properties can be r_centric, v_pec, or r_perihelion to be sorted
-    Returns ranking of particles, concatinated
-    '''
-    with closing(Pool(3)) as p:
-        rank = p.map(rank_halo_particles, list(arr_split))
-    return np.concatenate(rank)
+# def rank_particles_by_halo(arr_split):
+#     '''
+#     input split array consists of properties of each particle within a halo
+#     grouped/split by halo, e.g.
+#     arr_split = [array([], dtype=uint64),
+#                  array([0], dtype=uint64),
+#                  array([1, 2], dtype=uint64),
+#                  array([3, 4, 5], dtype=uint64),
+#                  array([6, 7, 8, 9], dtype=uint64)]
+#     Properties can be r_centric, v_pec, or r_perihelion to be sorted
+#     Returns ranking of particles, concatinated
+#     '''
+#     with closing(Pool(3)) as p:
+#         rank = p.map(rank_halo_particles, list(arr_split))
+#     return np.concatenate(rank)
 
 
 def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
@@ -597,43 +597,41 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         ptab[key] = np.int32(-1)
     print('Creating particle indices...')
     # splited arrays by halos, becomes iterable for MP
-    pidx = vrange(htab['halo_subsamp_start'].data,
-                  htab['halo_subsamp_len'].data)
-    if model.param_dict['s'] != 0:
-        r_centric = ptab['r_centric'][pidx].data
-        print('Splitting r_centric data array by halos...')
-        r_centric_split = np.split(r_centric,
-                                   htab['halo_subsamp_start'].data[1:])
-        print('Calculating halo centric distance rankings with MP...')
-        ptab['rank_s'] = rank_particles_by_halo(r_centric_split)
-    if model.param_dict['s_v'] != 0:
-        v_pec = ptab['v_pec'][pidx]
-        print('Splitting v_pec data array by halos...')
-        v_pec_split = np.split(v_pec, htab['halo_subsamp_start'].data[1:])
-        print('Calculating peculiar speed rankings with MP...')
-        ptab['rank_s_v'] = rank_particles_by_halo(v_pec_split)
-    if model.param_dict['s_p'] != 0:
-        r_perihelion = ptab['r_perihelion'][pidx]
-        print('Splitting r_perihelion data array by halos...')
-        r_perihelion_split = np.split(r_perihelion,
-                                      htab['halo_subsamp_start'].data[1:])
-        print('Calculating perihelion distance rankings with MP...')
-        ptab['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
-
-#    for i in range(N_halos):
-#        m = htab['halo_subsamp_start'][i]
-#        n = htab['halo_subsamp_len'][i]
-#        if model.param_dict['s'] != 0:
-#            # furtherst particle has lowest rank, 0, innermost N-1
-#            ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
-#                                    .argsort()[::-1].argsort()
-#        if model.param_dict['s_v'] != 0:
-#            ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
-#                                      .argsort()[::-1].argsort()
-#        if model.param_dict['s_p'] != 0:
-#            ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
-#                                      .argsort()[::-1].argsort()
-
+    # pidx = vrange(htab['halo_subsamp_start'].data,
+    #               htab['halo_subsamp_len'].data)
+    # if model.param_dict['s'] != 0:
+    #     r_centric = ptab['r_centric'][pidx].data
+    #     print('Splitting r_centric data array by halos...')
+    #     r_centric_split = np.split(r_centric,
+    #                                htab['halo_subsamp_start'].data[1:])
+    #     print('Calculating halo centric distance rankings with MP...')
+    #     ptab['rank_s'] = rank_particles_by_halo(r_centric_split)
+    # if model.param_dict['s_v'] != 0:
+    #     v_pec = ptab['v_pec'][pidx]
+    #     print('Splitting v_pec data array by halos...')
+    #     v_pec_split = np.split(v_pec, htab['halo_subsamp_start'].data[1:])
+    #     print('Calculating peculiar speed rankings with MP...')
+    #     ptab['rank_s_v'] = rank_particles_by_halo(v_pec_split)
+    # if model.param_dict['s_p'] != 0:
+    #     r_perihelion = ptab['r_perihelion'][pidx]
+    #     print('Splitting r_perihelion data array by halos...')
+    #     r_perihelion_split = np.split(r_perihelion,
+    #                                   htab['halo_subsamp_start'].data[1:])
+    #     print('Calculating perihelion distance rankings with MP...')
+    #     ptab['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
+    for i in range(N_halos):
+        m = htab['halo_subsamp_start'][i]
+        n = htab['halo_subsamp_len'][i]
+        if model.param_dict['s'] != 0:
+            # furtherst particle has lowest rank, 0, innermost N-1
+            ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
+                                    .argsort()[::-1].argsort()
+        if model.param_dict['s_v'] != 0:
+            ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
+                                      .argsort()[::-1].argsort()
+        if model.param_dict['s_p'] != 0:
+            ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
+                                      .argsort()[::-1].argsort()
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     ptab['N_sat_model'] = (

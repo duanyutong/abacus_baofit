@@ -12,7 +12,8 @@ import os
 from glob import glob
 from itertools import product
 from functools import partial
-from multiprocessing import pool, Process
+# from multiprocessing import pool, Process
+from multiprocessing import Pool
 import numpy as np
 from astropy import table
 from halotools.mock_observables import tpcf_multipole
@@ -44,7 +45,7 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
 # model_names = ['gen_allbiases_n']
 N_reals = 16  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 10  # for a single MP pool thread
+N_threads = 3  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dWimension
 
 # %% flags
@@ -75,9 +76,25 @@ halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
 
+# # %% MP Class
+# class NoDaemonProcess(Process):
+#     # make 'daemon' attribute always return False
+#     def _get_daemon(self):
+#         return False
+
+#     def _set_daemon(self, value):
+#         pass
+#     daemon = property(_get_daemon, _set_daemon)
+
+
+# # We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# # because the latter is only a wrapper function, not a proper class.
+# class Pool(pool.Pool):
+
+#     Process = NoDaemonProcess
+
+
 # %% definitionss of statisical formulae
-
-
 def auto_analytic_random_smu(ND, s_bins, mu_bins, V):
 
     '''
@@ -268,23 +285,6 @@ def find_repeated_entries(arr):
 def sum_lengths(i, len_arr):
 
     return np.sum(len_arr[i])
-
-
-class NoDaemonProcess(Process):
-    # make 'daemon' attribute always return False
-    def _get_daemon(self):
-        return False
-
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-
-
-# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
-# because the latter is only a wrapper function, not a proper class.
-class Pool(pool.Pool):
-
-    Process = NoDaemonProcess
 
 
 def process_rockstar_halocat(halocat, N_cut):
