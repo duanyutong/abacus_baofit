@@ -7,7 +7,7 @@ Created on Wed Oct 25 17:30:51 2017
 """
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
-# from contextlib import closing
+from contextlib import closing
 import os
 from glob import glob
 from itertools import product
@@ -44,7 +44,7 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
 # model_names = ['gen_base1']
 N_reals = 16  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 4  # for a single MP pool thread
+N_threads = 3  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dWimension
 
 # %% flags
@@ -306,8 +306,8 @@ def process_rockstar_halocat(halocat, N_cut):
           .format(N_cut))
     N0 = len(halocat.halo_table)
     mask_halo = ((halocat.halo_table['halo_upid'] == -1)  # only host halos
-                 & (halocat.halo_table['halo_N'] >= N_cut)
-                 & (halocat.halo_table['halo_subsamp_len'] > 0))
+                 & (halocat.halo_table['halo_N'] >= N_cut))
+    #             & (halocat.halo_table['halo_subsamp_len'] > 0))
     mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)  # child subhalos
                     & np.isin(
                             halocat.halo_table['halo_upid'],
@@ -322,9 +322,9 @@ def process_rockstar_halocat(halocat, N_cut):
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
     print('Rewriting halo_table subsample fields with MP...')
-    p = Pool(processes=16, maxtasksperchild=1000)
-    ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
-                   hidx_split)
+    with closing(Pool(processes=16, maxtasksperchild=1)) as p:
+        ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
+                       hidx_split)
     p.close()
     p.join()
     htab = htab[htab['halo_upid'] == -1]  # drop subhalos now that ptcl r done
@@ -768,7 +768,7 @@ def do_realisation(r, model_name):
     if np.all([os.path.isfile(path) for path in paths]) and reuse_galaxies:
         # all output files exist, skip this realisation
         xi_s_mu, xi_0, xi_2, wp = [np.loadtxt(path) for path in paths[1:]]
-        print('All output files for r = {:02}, model {} exists.'
+        print('All output files for r = {:2d}, model {} exists.'
               .format(r, model_name))
     else:
         print('Generating r = {} for phase {}, model {}...'
@@ -802,7 +802,7 @@ def do_realisation(r, model_name):
                       format='ascii.fast_csv', overwrite=True)
         # save galaxy table
         if save_hod_realisation:
-            print('Saving galaxy table: {} ...'.format(paths[0]))
+            print('Saving galaxy table for r = {} ...'.format(r))
             try:
                 os.makedirs(os.path.dirname(paths[0]))
             except OSError:
@@ -812,13 +812,13 @@ def do_realisation(r, model_name):
 
         do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
         do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
-        do_auto_correlation(model, mode='smu')
+        xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
         do_subcross_correlation(model, N_sub=N_sub)
         do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
-        do_auto_correlation(model, mode='wp')
-        print('Finished r = {} cleanly.'.format(r))
+        wp = do_auto_correlation(model, mode='wp')
+        print('Finished r = {}.'.format(r))
 
-    # return xi_s_mu, xi_0, xi_2, wp
+    return xi_s_mu, xi_0, xi_2, wp
 
 
 def do_realisations(halocat, model_name, phase, N_reals):
@@ -829,47 +829,34 @@ def do_realisations(halocat, model_name, phase, N_reals):
     the rest of the programme will work as if there is only 1 realisation
     '''
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-    print('---\n Working on {} realisations of {}, model {}...\n ---'
+    print('---\nWorking on {} realisations of {}, model {}...\n---'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    p = Pool(processes=8, maxtasksperchild=1000)
-    p.map(partial(do_realisation, model_name=model_name),
-          range(N_reals))
-    p.close()
-    p.join()
-    print('---\n Pool closed cleanly for {} realisations of model {}.\n ---'
+    with closing(Pool(processes=8, maxtasksperchild=1)) as p:
+        ans = p.map(partial(do_realisation, model_name=model_name),
+                    range(N_reals))
+    print('---\nPool closed cleanly for {} realisations of model {}.\n---'
           .format(N_reals, model_name))
 
-#    with closing(Pool(int(N_reals/2))) as p:
-#        p.map(partial(do_realisation, model_name=model_name),
-#              range(0, int(N_reals/2)))
-#    print('Pool closed cleanly for {} realisations of model {}.'
-#          .format(int(N_reals/2), model_name))
-#    with closing(Pool(int(N_reals/2))) as p:
-#        p.map(partial(do_realisation, model_name=model_name),
-#              range(int(N_reals/2), N_reals))
-#    print('Pool closed cleanly for {} realisations of model {}.'
+#    # collect auto-xi to coadd all realisations for the current phase
+#    filenames = ['auto-xi_s_mu.txt', 'auto-xi_0.txt',
+#                 'auto-xi_2.txt', 'auto-wp.txt']
+#    arr_list = []
+#    for fn in filenames:
+#        paths = [os.path.join(save_dir, sim_name,
+#                              'z{}-r{}'.format(redshift, r),
+#                              '{}-{}'.format(model_name, fn))
+#                 for r in range(N_reals)]
+#        arr_list.append([np.loadtxt(path) for path in paths])
+#    print('Co-adding auto-correlation from {} realisations for model {}...'
 #          .format(N_reals, model_name))
+#    assert len(arr_list) == 4
 
-    # collect auto-xi to coadd all realisations for the current phase
-    filenames = ['auto-xi_s_mu.txt', 'auto-xi_0.txt',
-                 'auto-xi_2.txt', 'auto-wp.txt']
-    arr_list = []
-    for fn in filenames:
-        paths = [os.path.join(save_dir, sim_name,
-                              'z{}-r{}'.format(redshift, r),
-                              '{}-{}'.format(model_name, fn))
-                 for r in range(N_reals)]
-        arr_list.append([np.loadtxt(path) for path in paths])
-    print('Co-adding auto-correlation from {} realisations for model {}...'
-          .format(N_reals, model_name))
-    assert len(arr_list) == 4
-#    for corr in ans:
-#        xi_s_mu_list.append(corr[0])
-#        xi_0_list.append(corr[1])
-#        xi_2_list.append(corr[2])
-#        wp_list.append(corr[3])
-    outputs = coadd_xi_list(arr_list)
+    xi_s_mu_list = [corr[0] for corr in ans]
+    xi_0_list = [corr[1] for corr in ans]
+    xi_2_list = [corr[2] for corr in ans]
+    wp_list = [corr[3] for corr in ans]
+    outputs = coadd_xi_list([xi_s_mu_list, xi_0_list, xi_2_list, wp_list])
     filenames = ['auto-xi_s_mu-ca.txt', 'auto-xi_s_mu-err.txt',
                  'auto-xi_0-ca.txt', 'auto-xi_0-err.txt',
                  'auto-xi_2-ca.txt', 'auto-xi_2-err.txt',
@@ -968,10 +955,8 @@ def run_baofit_parallel(baofit_phases=range(16)):
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    p = Pool(16)
-    p.map(baofit, list_of_inputs)
-    p.close()
-    p.join()
+    with closing(Pool(16)) as p:
+        p.map(baofit, list_of_inputs)
 
 
 if __name__ == "__main__":

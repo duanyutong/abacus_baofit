@@ -144,7 +144,6 @@ def rank_halo_particles(arr):
 def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
                            max_iter=10, precision=0.1):
 
-    print('Processing particle table properties...')
     # add host_centric_distance for all particles for bias s
     ptab['x_rel'] = ptab['x'] - ptab['halo_x']  # Mpc/h
     ptab['y_rel'] = ptab['y'] - ptab['halo_y']  # Mpc/h
@@ -206,12 +205,9 @@ def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
             print(str_template + ' Maximum iterations reached.')
             break
         else:
-            # print(str_template)
-            pass
+            pass  # print(str_template)
 
     ptab['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
-
-    # return ptab
 
 
 def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
@@ -479,7 +475,8 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
             model.mock.halo_table = halocat.halo_table
             model.mock.halo_ptcl_table = halocat.halo_ptcl_table
         # generate galaxy catalogue and overwrite model.mock.galaxy_table
-        print('Populating {} halos...'.format(len(model.mock.halo_table)))
+        print('Populating {} halos, r = {}...'
+              .format(len(model.mock.halo_table), model.r))
         model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
 
     print('Mock catalogue populated with {} galaxies'
@@ -566,26 +563,30 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         ind_m = halo_m.argsort()
         ind_pm = halo_pseudomass_sat.argsort().argsort()
         halo_m = halo_m[ind_m][ind_pm]
-    htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict) \
-        / htab['halo_subsamp_len']
+    # if subsamp_len = 0 for a row, we skip it and keep the undivided prob
+    mask = htab['halo_subsamp_len'] != 0
+    htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict)
+    htab['N_sat_model'][mask] /= htab['halo_subsamp_len']
     # # fix inf due to dividing by zero
     # htab['N_sat_model'][htab['halo_subsamp_len'] == 0] = 0
-    print('Creating inherited halo properties for centrals...')
+    print('Creating inherited halo properties for centrals, r = {}...'
+          .format(model.r))
     ptab = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_particles = len(ptab)
     # inherite columns from halo talbe and add to particle table
     # particles belonging to the same halo share the same values
-    col_ptc_inh = ['halo_upid', 'halo_id', 'halo_hostid',
+    col_cen_inh = ['halo_upid', 'halo_id', 'halo_hostid',
                    'halo_x', 'halo_y', 'halo_z',
                    'halo_vx', 'halo_vy', 'halo_vz',
                    'halo_klypin_rs', 'halo_nfw_conc', model.halo_m_prop,
                    'halo_subsamp_start', 'halo_subsamp_len',
                    'N_cen_model', 'N_cen_rand', 'N_sat_model']
-    for col in list(set(col_ptc_inh)):
+    for col in list(set(col_cen_inh)):
         # numpy bug, cannot cast uint64 to int64 for repeat
         ptab[col] = np.repeat(htab[col],
                               htab['halo_subsamp_len'].astype(np.int64))
     # calculate additional particle quantities for decorations
+    print('Processing particle table properties for r = {}...'.format(model.r))
     process_particle_props(ptab, h, halo_m_prop=model.halo_m_prop)
     # particle table complete. onto satellite generation
     # calculate satellite probablity and generate random numbers
@@ -635,18 +636,20 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                 .argsort()[::-1].argsort()
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
-    ptab['N_sat_model'] = (
-        ptab['N_sat_model'] *
-        (1 + model.param_dict['s']
-         * (1 - 2*ptab['rank_s']/(ptab['halo_subsamp_len']-1))))
-    ptab['N_sat_model'] = (
-        ptab['N_sat_model'] *
-        (1 + model.param_dict['s_v']
-         * (1 - 2*ptab['rank_s_v']/(ptab['halo_subsamp_len']-1))))
-    ptab['N_sat_model'] = (
-        ptab['N_sat_model'] *
-        (1 + model.param_dict['s_p']
-         * (1 - 2*ptab['rank_s_p']/(ptab['halo_subsamp_len']-1))))
+    # only re-rank halos where subsamp_len >= 2
+    mask = ptab['halo_subsamp_len'] >= 2
+    ptab['N_sat_model'][mask] *= (
+            1 + model.param_dict['s']
+            * (1 - 2*ptab['rank_s'][mask]
+                / (ptab['halo_subsamp_len'][mask]-1)))
+    ptab['N_sat_model'][mask] *= (
+            1 + model.param_dict['s_v']
+            * (1 - 2*ptab['rank_s_v'][mask]
+                / (ptab['halo_subsamp_len'][mask]-1)))
+    ptab['N_sat_model'][mask] *= (
+            1 + model.param_dict['s_p']
+            * (1 - 2*ptab['rank_s_p'][mask]
+                / (ptab['halo_subsamp_len'][mask]-1)))
     # select particles which host satellites
     mask_sat = ptab['N_sat_rand'] < ptab['N_sat_model']
     # correct for RSD
@@ -656,17 +659,24 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    model.mock.BoxSize/h) * h  # in Mpc/h
     else:
         z = ptab['z'][mask_sat]
-    print('Creating inherited halo properties for satellites...')
+    print('Creating inherited halo properties for centrals, r = {}...'
+          .format(model.r))
     # satellite calculation done, create satellites table
     # create galaxy_table columns to be inherited from particle table
     # all position and velocity columns except z are inherited from particle
-    col_sat_inh = list(set(col_ptc_inh + ['x', 'y', 'vx', 'vy', 'vz',
+    col_sat_inh = list(set(col_cen_inh + ['x', 'y', 'vx', 'vy', 'vz',
                                           'x_rel', 'y_rel', 'z_rel',
                                           'vx_pec', 'vy_pec', 'vz_pec',
                                           'v_rad', 'v_tan',
                                           'r_centric', 'r_perihelion',
                                           'N_sat_model', 'N_sat_rand',
                                           'rank_s', 'rank_s_v', 'rank_s_p']))
+    for col in col_sat_inh:
+        if (col in ptab.keys()) and (len(ptab[col][mask_sat]) == len(ptab[mask_sat])):
+            pass
+        else:
+            print('inconsistent lengths',
+                  len(ptab[col][mask_sat]), len(ptab[mask_sat]))
     gtab_inh = table.Table([ptab[col][mask_sat] for col in col_sat_inh],
                            names=col_sat_inh)
     col_sat_new = ['z']
