@@ -13,6 +13,7 @@ from glob import glob
 from itertools import product
 from functools import partial
 from multiprocessing import Pool
+import traceback
 import numpy as np
 from astropy import table
 from halotools.mock_observables import tpcf_multipole
@@ -32,7 +33,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'z0.5'  # 'z0.5'
-phases = range(6, 16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -756,67 +757,72 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 def do_realisation(r, model_name):
 
     global halocat
-    phase = halocat.ZD_Seed
-    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-    # check if files exist in the realisation directory
-    filenames = ['galaxy_table.csv', 'auto-xi_s_mu.txt',
-                 'auto-xi_0.txt', 'auto-xi_2.txt', 'auto-wp.txt']
-    paths = [os.path.join(save_dir, sim_name,
-                          'z{}-r{}'.format(redshift, r),
-                          '{}-{}'.format(model_name, fn))
-             for fn in filenames]
-    if np.all([os.path.isfile(path) for path in paths]) and reuse_galaxies:
-        # all output files exist, skip this realisation
-        xi_s_mu, xi_0, xi_2, wp = [np.loadtxt(path) for path in paths[1:]]
-        print('All output files for r = {:2d}, model {} exists.'
-              .format(r, model_name))
-    else:
-        print('Generating r = {} for phase {}, model {}...'
-              .format(r, phase, model_name))
-        model = initialise_model(halocat.redshift, model_name,
-                                 halo_m_prop=halo_m_prop)
-        model.N_cut = N_cut
-        model.c_median_poly = np.poly1d(
-                np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
-        model.r = r  # add useful model properties here
-        # set random seed using phase and realisation index r, model indep
-        seed = phase*100 + r
-        np.random.seed(seed)
-        model = populate_model(halocat, model,
-                               add_rsd=add_rsd, N_threads=N_threads)
-        # save galaxy table meta to sim directory
-        N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
-        N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
-        N_gal = len(model.mock.galaxy_table)
-        if os.path.isfile(os.path.join(save_dir, 'galaxy_table_meta.csv')):
-            gt_meta = table.Table.read(
-                    os.path.join(save_dir, 'galaxy_table_meta.csv'))
+    try:
+        phase = halocat.ZD_Seed
+        sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+        # check if files exist in the realisation directory
+        filenames = ['galaxy_table.csv', 'auto-xi_s_mu.txt',
+                     'auto-xi_0.txt', 'auto-xi_2.txt', 'auto-wp.txt']
+        paths = [os.path.join(save_dir, sim_name,
+                              'z{}-r{}'.format(redshift, r),
+                              '{}-{}'.format(model_name, fn))
+                 for fn in filenames]
+        if np.all([os.path.isfile(path) for path in paths]) and reuse_galaxies:
+            # all output files exist, skip this realisation
+            xi_s_mu, xi_0, xi_2, wp = [np.loadtxt(path) for path in paths[1:]]
+            print('All output files for r = {:2d}, model {} exists.'
+                  .format(r, model_name))
         else:
-            # create a csv file to store galaxy table metadata
-            gt_meta = table.Table(
-                    names=('model name', 'phase', 'realisation', 'seed',
-                           'N centrals', 'N satellites', 'N galaxies'),
-                    dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-        gt_meta.add_row((model_name, phase, r, seed, N_cen, N_sat, N_gal))
-        gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
-                      format='ascii.fast_csv', overwrite=True)
-        # save galaxy table
-        if save_hod_realisation:
-            print('Saving galaxy table for r = {} ...'.format(r))
-            try:
-                os.makedirs(os.path.dirname(paths[0]))
-            except OSError:
-                pass
-            model.mock.galaxy_table.write(
-                    paths[0], format='ascii.fast_csv', overwrite=True)
+            print('Generating r = {} for phase {}, model {}...'
+                  .format(r, phase, model_name))
+            model = initialise_model(halocat.redshift, model_name,
+                                     halo_m_prop=halo_m_prop)
+            model.N_cut = N_cut
+            model.c_median_poly = np.poly1d(
+                    np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
+            model.r = r  # add useful model properties here
+            # set random seed using phase and realisation index r, model indep
+            seed = phase*100 + r
+            np.random.seed(seed)
+            model = populate_model(halocat, model,
+                                   add_rsd=add_rsd, N_threads=N_threads)
+            # save galaxy table meta to sim directory
+            N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
+            N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
+            N_gal = len(model.mock.galaxy_table)
+            if os.path.isfile(os.path.join(save_dir, 'galaxy_table_meta.csv')):
+                gt_meta = table.Table.read(
+                        os.path.join(save_dir, 'galaxy_table_meta.csv'))
+            else:
+                # create a csv file to store galaxy table metadata
+                gt_meta = table.Table(
+                        names=('model name', 'phase', 'realisation', 'seed',
+                               'N centrals', 'N satellites', 'N galaxies'),
+                        dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+            gt_meta.add_row((model_name, phase, r, seed, N_cen, N_sat, N_gal))
+            gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
+                          format='ascii.fast_csv', overwrite=True)
+            # save galaxy table
+            if save_hod_realisation:
+                print('Saving galaxy table for r = {} ...'.format(r))
+                try:
+                    os.makedirs(os.path.dirname(paths[0]))
+                except OSError:
+                    pass
+                model.mock.galaxy_table.write(
+                        paths[0], format='ascii.fast_csv', overwrite=True)
 
-        do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
-        do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
-        xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
-        do_subcross_correlation(model, N_sub=N_sub)
-        do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
-        wp = do_auto_correlation(model, mode='wp')
-        print('Finished r = {}.'.format(r))
+            do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
+            do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
+            xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
+            do_subcross_correlation(model, N_sub=N_sub)
+            do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
+            wp = do_auto_correlation(model, mode='wp')
+            print('Finished r = {}.'.format(r))
+    except Exception as e:
+        print('Caught exception in worker thread r = {}'.format(r))
+        traceback.print_exc()
+        raise e
 
     return xi_s_mu, xi_0, xi_2, wp
 
@@ -829,7 +835,7 @@ def do_realisations(halocat, model_name, phase, N_reals):
     the rest of the programme will work as if there is only 1 realisation
     '''
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-    print('---\nWorking on {} realisations of {}, model {}...\n---'
+    print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
     with closing(Pool(processes=8, maxtasksperchild=1)) as p:
@@ -848,10 +854,9 @@ def do_realisations(halocat, model_name, phase, N_reals):
 #                              '{}-{}'.format(model_name, fn))
 #                 for r in range(N_reals)]
 #        arr_list.append([np.loadtxt(path) for path in paths])
-#    print('Co-adding auto-correlation from {} realisations for model {}...'
-#          .format(N_reals, model_name))
 #    assert len(arr_list) == 4
-
+    print('Co-adding auto-correlation from {} realisations for model {}...'
+          .format(N_reals, model_name))
     xi_s_mu_list = [corr[0] for corr in ans]
     xi_0_list = [corr[1] for corr in ans]
     xi_2_list = [corr[2] for corr in ans]

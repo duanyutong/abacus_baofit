@@ -566,7 +566,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     # if subsamp_len = 0 for a row, we skip it and keep the undivided prob
     mask = htab['halo_subsamp_len'] != 0
     htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict)
-    htab['N_sat_model'][mask] /= htab['halo_subsamp_len']
+    htab['N_sat_model'][mask] /= htab['halo_subsamp_len'][mask]
     # # fix inf due to dividing by zero
     # htab['N_sat_model'][htab['halo_subsamp_len'] == 0] = 0
     print('Creating inherited halo properties for centrals, r = {}...'
@@ -638,18 +638,12 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     # only re-rank halos where subsamp_len >= 2
     mask = ptab['halo_subsamp_len'] >= 2
-    ptab['N_sat_model'][mask] *= (
-            1 + model.param_dict['s']
-            * (1 - 2*ptab['rank_s'][mask]
-                / (ptab['halo_subsamp_len'][mask]-1)))
-    ptab['N_sat_model'][mask] *= (
-            1 + model.param_dict['s_v']
-            * (1 - 2*ptab['rank_s_v'][mask]
-                / (ptab['halo_subsamp_len'][mask]-1)))
-    ptab['N_sat_model'][mask] *= (
-            1 + model.param_dict['s_p']
-            * (1 - 2*ptab['rank_s_p'][mask]
-                / (ptab['halo_subsamp_len'][mask]-1)))
+    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s'] * (
+        1 - 2*ptab['rank_s'][mask] / (ptab['halo_subsamp_len'][mask]-1))
+    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s_v'] * (
+        1 - 2*ptab['rank_s_v'][mask] / (ptab['halo_subsamp_len'][mask]-1))
+    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s_p'] * (
+        1 - 2*ptab['rank_s_p'][mask] / (ptab['halo_subsamp_len'][mask]-1))
     # select particles which host satellites
     mask_sat = ptab['N_sat_rand'] < ptab['N_sat_model']
     # correct for RSD
@@ -671,12 +665,9 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                                           'r_centric', 'r_perihelion',
                                           'N_sat_model', 'N_sat_rand',
                                           'rank_s', 'rank_s_v', 'rank_s_p']))
-    for col in col_sat_inh:
-        if (col in ptab.keys()) and (len(ptab[col][mask_sat]) == len(ptab[mask_sat])):
-            pass
-        else:
-            print('inconsistent lengths',
-                  len(ptab[col][mask_sat]), len(ptab[mask_sat]))
+    for col in col_sat_inh:  # debug
+        assert col in ptab.keys()
+        assert len(ptab[col][mask_sat]) == len(ptab[mask_sat])
     gtab_inh = table.Table([ptab[col][mask_sat] for col in col_sat_inh],
                            names=col_sat_inh)
     col_sat_new = ['z']
