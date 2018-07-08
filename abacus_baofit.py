@@ -866,8 +866,10 @@ def do_realisation(r, model_name):
             N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
             N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
             N_gal = len(model.mock.galaxy_table)
+            assert N_cen + N_sat == N_gal
             gt_meta = table.Table(
-                    [model_name, phase, r, seed, N_cen, N_sat, N_gal],
+                    [[model_name], [phase], [r], [seed],
+                     [N_cen], [N_sat], [N_gal]],
                     names=('model name', 'phase', 'realisation', 'seed',
                            'N centrals', 'N satellites', 'N galaxies'),
                     dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
