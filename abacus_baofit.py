@@ -906,8 +906,7 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    # with closing(Pool(processes=8, maxtasksperchild=1)) as p:
-    with closing(Pool(processes=8)) as p:
+    with closing(Pool(processes=8, maxtasksperchild=1)) as p:
         ans = p.map(partial(do_realisation, model_name=model_name),
                     range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
