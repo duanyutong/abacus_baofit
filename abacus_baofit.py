@@ -28,12 +28,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
-# from tqdm import tqdm
+from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'z0.5'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(5, 16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -323,7 +323,8 @@ def process_rockstar_halocat(halocat, N_cut):
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
     print('Rewriting halo_table subsample fields with MP...')
-    with closing(Pool(processes=16, maxtasksperchild=1)) as p:
+    # with closing(Pool(processes=16, maxtasksperchild=1)) as p:
+    with closing(Pool(processes=16)) as p:
         ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
                        hidx_split)
     p.close()
@@ -347,6 +348,71 @@ def process_rockstar_halocat(halocat, N_cut):
                   htab['halo_subsamp_len'].min()))
 
     return halocat
+
+
+def fit_c_median(phases=range(16)):
+
+    '''
+    median concentration as a function of log halo mass in Msun/h
+    c_med(log(m)) = poly(log(m))
+
+    '''
+    # check if output file already exists
+    if os.path.isfile(os.path.join(save_dir, 'c_median_poly.txt')):
+        return None
+    # load 16 phases for the given cosmology and redshift
+    print('Loading halo catalogues...')
+    halocats = abacus_ht.make_catalogs(
+        sim_name=sim_name_prefix, products_dir=prod_dir,
+        redshifts=[redshift], cosmologies=[cosmology], phases=phases,
+        halo_type=halo_type,
+        load_halo_ptcl_catalog=False,  # this loads 10% particle subsamples
+        load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
+        load_pids='auto')[0][0]
+    htabs = [halocat.halo_table for halocat in halocats]
+    htab = table.vstack(htabs)  # combine all phases into one halo table
+    mask = (htab['halo_N'] >= N_cut) & (htab['halo_upid'] == -1)
+    htab = htab[mask]   # mass cut
+    halo_logm = np.log10(htab['halo_mvir'].data)
+    halo_nfw_conc = htab['halo_rvir'].data / htab['halo_klypin_rs'].data
+    # set up bin edges, the last edge larger than the most massive halo
+    logm_bins = np.linspace(np.min(halo_logm), np.max(halo_logm)+0.001,
+                            endpoint=True, num=100)
+    logm_bins_centre = (logm_bins[:-1] + logm_bins[1:]) / 2
+    N_halos, _ = np.histogram(halo_logm, bins=logm_bins)
+    c_median = np.zeros(len(logm_bins_centre))
+    c_median_std = np.zeros(len(logm_bins_centre))
+    for i in range(len(logm_bins_centre)):
+        mask = (logm_bins[i] <= halo_logm) & (halo_logm < logm_bins[i+1])
+        c_median[i] = np.median(halo_nfw_conc[mask])
+        c_median_std[i] = np.std(halo_nfw_conc[mask])
+    # when there is 0 data point in bin, median = std = nan, remove
+    # when there is only 1 data point in bin, std = 0 and w = inf
+    # when there are few data points, std very small (<1), w large
+    # rescale weight by sqrt(N-1)
+    mask = c_median_std > 0
+    N_halos, logm_bins_centre, c_median, c_median_std = \
+        N_halos[mask], logm_bins_centre[mask], \
+        c_median[mask], c_median_std[mask]
+    weights = 1/np.array(c_median_std)*np.sqrt(N_halos-1)
+    coefficients = np.polyfit(logm_bins_centre, c_median, 3, w=weights)
+    print('Polynomial found as : {}.'.format(coefficients))
+    # save coefficients to txt file
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    np.savetxt(os.path.join(save_dir, 'c_median_poly.txt'),
+               coefficients, fmt=txtfmt)
+    c_median_poly = np.poly1d(coefficients)
+    # plot fit
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.errorbar(logm_bins_centre, c_median, yerr=c_median_std,
+                capsize=3, capthick=0.5, fmt='.', ms=4, lw=0.2)
+    ax.plot(logm_bins_centre, c_median_poly(logm_bins_centre), '-')
+    ax.set_title('Median Concentration Polynomial Fit from {} Boxes'
+                 .format(len(phases)))
+    fig.savefig(os.path.join(save_dir, 'c_median_poly.pdf'))
+
+    return halocats
 
 
 def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
@@ -786,22 +852,6 @@ def do_realisation(r, model_name):
             np.random.seed(seed)
             model = populate_model(halocat, model,
                                    add_rsd=add_rsd, N_threads=N_threads)
-            # save galaxy table meta to sim directory
-            N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
-            N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
-            N_gal = len(model.mock.galaxy_table)
-            if os.path.isfile(os.path.join(save_dir, 'galaxy_table_meta.csv')):
-                gt_meta = table.Table.read(
-                        os.path.join(save_dir, 'galaxy_table_meta.csv'))
-            else:
-                # create a csv file to store galaxy table metadata
-                gt_meta = table.Table(
-                        names=('model name', 'phase', 'realisation', 'seed',
-                               'N centrals', 'N satellites', 'N galaxies'),
-                        dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-            gt_meta.add_row((model_name, phase, r, seed, N_cen, N_sat, N_gal))
-            gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
-                          format='ascii.fast_csv', overwrite=True)
             # save galaxy table
             if save_hod_realisation:
                 print('Saving galaxy table for r = {} ...'.format(r))
@@ -810,8 +860,24 @@ def do_realisation(r, model_name):
                 except OSError:
                     pass
                 model.mock.galaxy_table.write(
-                        paths[0], format='ascii.fast_csv', overwrite=True)
-
+                    paths[0], format='ascii.fast_csv', overwrite=True)
+            # save galaxy table metadata to sim directory, one file for each
+            # to be combined later to avoid threading conflicts
+            N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
+            N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
+            N_gal = len(model.mock.galaxy_table)
+            gt_meta = table.Table(
+                    [model_name, phase, r, seed, N_cen, N_sat, N_gal],
+                    names=('model name', 'phase', 'realisation', 'seed',
+                           'N centrals', 'N satellites', 'N galaxies'),
+                    dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+            if not os.path.exists(os.path.join(save_dir, 'galaxy_table_meta')):
+                os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
+            gt_meta.write(os.path.join(
+                save_dir, 'galaxy_table_meta',
+                '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
+                format='ascii.fast_csv', overwrite=True)
+            # perform statistics on model.mock.galaxy_table
             do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
             do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
             xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
@@ -819,10 +885,10 @@ def do_realisation(r, model_name):
             do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
             wp = do_auto_correlation(model, mode='wp')
             print('Finished r = {}.'.format(r))
-    except Exception as e:
-        print('Caught exception in worker thread r = {}'.format(r))
+    except Exception as E:
+        print('Exception caught in worker thread r = {}'.format(r))
         traceback.print_exc()
-        raise e
+        raise E
 
     return xi_s_mu, xi_0, xi_2, wp
 
@@ -838,25 +904,14 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    with closing(Pool(processes=8, maxtasksperchild=1)) as p:
+    # with closing(Pool(processes=8, maxtasksperchild=1)) as p:
+    with closing(Pool(processes=8)) as p:
         ans = p.map(partial(do_realisation, model_name=model_name),
                     range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
           .format(N_reals, model_name))
-
-#    # collect auto-xi to coadd all realisations for the current phase
-#    filenames = ['auto-xi_s_mu.txt', 'auto-xi_0.txt',
-#                 'auto-xi_2.txt', 'auto-wp.txt']
-#    arr_list = []
-#    for fn in filenames:
-#        paths = [os.path.join(save_dir, sim_name,
-#                              'z{}-r{}'.format(redshift, r),
-#                              '{}-{}'.format(model_name, fn))
-#                 for r in range(N_reals)]
-#        arr_list.append([np.loadtxt(path) for path in paths])
-#    assert len(arr_list) == 4
-    print('Co-adding auto-correlation from {} realisations for model {}...'
-          .format(N_reals, model_name))
+    # print('Co-adding auto-correlation from {} realisations for model {}...'
+    #       .format(N_reals, model_name))
     xi_s_mu_list = [corr[0] for corr in ans]
     xi_0_list = [corr[1] for corr in ans]
     xi_2_list = [corr[2] for corr in ans]
@@ -875,69 +930,23 @@ def do_realisations(halocat, model_name, phase, N_reals):
         np.savetxt(paths[i], output, fmt=txtfmt)
 
 
-def fit_c_median(phases=range(16)):
+def combine_galaxy_table_metadata():
 
-    '''
-    median concentration as a function of log halo mass in Msun/h
-    c_med(log(m)) = poly(log(m))
-
-    '''
-    # check if output file already exists
-    if os.path.isfile(os.path.join(save_dir, 'c_median_poly.txt')):
-        return None
-    # load 16 phases for the given cosmology and redshift
-    print('Loading halo catalogues...')
-    halocats = abacus_ht.make_catalogs(
-        sim_name=sim_name_prefix, products_dir=prod_dir,
-        redshifts=[redshift], cosmologies=[cosmology], phases=phases,
-        halo_type=halo_type,
-        load_halo_ptcl_catalog=False,  # this loads 10% particle subsamples
-        load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
-        load_pids='auto')[0][0]
-    htabs = [halocat.halo_table for halocat in halocats]
-    htab = table.vstack(htabs)  # combine all phases into one halo table
-    mask = (htab['halo_N'] >= N_cut) & (htab['halo_upid'] == -1)
-    htab = htab[mask]   # mass cut
-    halo_logm = np.log10(htab['halo_mvir'].data)
-    halo_nfw_conc = htab['halo_rvir'].data / htab['halo_klypin_rs'].data
-    # set up bin edges, the last edge larger than the most massive halo
-    logm_bins = np.linspace(np.min(halo_logm), np.max(halo_logm)+0.001,
-                            endpoint=True, num=100)
-    logm_bins_centre = (logm_bins[:-1] + logm_bins[1:]) / 2
-    N_halos, _ = np.histogram(halo_logm, bins=logm_bins)
-    c_median = np.zeros(len(logm_bins_centre))
-    c_median_std = np.zeros(len(logm_bins_centre))
-    for i in range(len(logm_bins_centre)):
-        mask = (logm_bins[i] <= halo_logm) & (halo_logm < logm_bins[i+1])
-        c_median[i] = np.median(halo_nfw_conc[mask])
-        c_median_std[i] = np.std(halo_nfw_conc[mask])
-    # when there is 0 data point in bin, median = std = nan, remove
-    # when there is only 1 data point in bin, std = 0 and w = inf
-    # when there are few data points, std very small (<1), w large
-    # rescale weight by sqrt(N-1)
-    mask = c_median_std > 0
-    N_halos, logm_bins_centre, c_median, c_median_std = \
-        N_halos[mask], logm_bins_centre[mask], \
-        c_median[mask], c_median_std[mask]
-    weights = 1/np.array(c_median_std)*np.sqrt(N_halos-1)
-    coefficients = np.polyfit(logm_bins_centre, c_median, 3, w=weights)
-    print('Polynomial found as : {}.'.format(coefficients))
-    # save coefficients to txt file
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    np.savetxt(os.path.join(save_dir, 'c_median_poly.txt'),
-               coefficients, fmt=txtfmt)
-    c_median_poly = np.poly1d(coefficients)
-    # plot fit
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.errorbar(logm_bins_centre, c_median, yerr=c_median_std,
-                capsize=3, capthick=0.5, fmt='.', ms=4, lw=0.2)
-    ax.plot(logm_bins_centre, c_median_poly(logm_bins_centre), '-')
-    ax.set_title('Median Concentration Polynomial Fit from {} Boxes'
-                 .format(len(phases)))
-    fig.savefig(os.path.join(save_dir, 'c_median_poly.pdf'))
-
-    return halocats
+    # check if metadata for all models, phases, and realisations exist
+    paths = [os.path.join(
+                save_dir, 'galaxy_table_meta',
+                '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r))
+             for model_name in model_names
+             for phase in phases
+             for r in range(N_reals)]
+    exist = [os.path.exists(path) for path in paths]
+    if not np.all(exist):  # at least one path does not exist, print it
+        raise NameError('Galaxy table metadata incomplete. Missing:\n{}'
+                        .format(np.array(paths)[~np.where(exist)]))
+    tables = [table.Table.read(path) for path in tqdm(paths)]
+    gt_meta = table.vstack(tables)
+    gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),
+                  format='ascii.fast_csv', overwrite=True)
 
 
 def run_baofit_parallel(baofit_phases=range(16)):
@@ -979,5 +988,6 @@ if __name__ == "__main__":
     for model_name in model_names:
         do_coadd_phases(model_name, coadd_phases=range(16))
         do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
+    # combine_galaxy_table_metadata()
 
     run_baofit_parallel(baofit_phases=range(16))
