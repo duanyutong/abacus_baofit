@@ -9,12 +9,12 @@ import sys
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/emulator_1100box_planck-subsample/' # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-z0.5/' # this is the save directory
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin
 binc = '' # binc = 0 # change number to change bin center
-bs = 5. # the r bin size of the data
+bs = 5.0 # the r bin size of the data
 bc = '.txt' # bc = 'post_recon_bincent'+str(binc)+'.dat' # common ending string of data files
 # fout = ft
 chi_min = 1000
@@ -220,8 +220,10 @@ class baofit3D_ellFull_1cov:
         return chit + BBfac + Btfac
 
 def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
-                    B0=1., spar=0.006, spat=0.003, 
-                    amin=0.8,amax=1.2,nobao='n',Bp=.4,Bt=.4,meth='Nelder-Mead',
+                    B0=1.,
+                    armin=1.0, armax=1.04, spar=0.0004,
+                    atmin=1.0, atmax=1.04, spat=0.0004, 
+                    nobao='n',Bp=.4,Bt=.4,meth='Nelder-Mead',
                     fout=''):
 
     # print('try meth = "Nelder-Mead" if does not work or answer is weird')
@@ -260,17 +262,17 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     fo = open(Hdir+'2Dbaofits/'+fout+'-arat-covchi.dat','w+')
     fg = open(Hdir+'2Dbaofits/'+fout+'-arat-covchigrid.dat','w+')
 #     chim = 1000
-    nar = int((amax-amin)/spar)
-    nat = int((amax-amin)/spat)
+    nar = int((armax-armin)/spar)
+    nat = int((atmax-atmin)/spat)
     grid = np.zeros((nar,nat))
     fac = ((chi_min-2)-len(dv))/(chi_min-1)
     
     chim = chi_min
     for i in range(nar):      
-        b.ar = amin+spar*i+spar/2.
+        b.ar = armin+spar*i+spar/2.
 #        print('b.ar: ', b.ar)
         for j in range(nat):
-            b.at = amin+spat*j+spat/2.
+            b.at = atmin+spat*j+spat/2.
             b.mkxi()
             inl = (B,B0)
             (B, B0) = minimize(b.chi_templ_alphfXX_an, inl, 
@@ -328,8 +330,10 @@ def baofit(inputs):
     invcb = np.linalg.pinv(covmb)
     # define template
     mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
-    alrm, altm, chim = Xism_arat_1C_an(dv, invc, rl, mod, dvb, invcb, rlb, 
-        amin=1.0, amax=1.04, spar=0.0004, spat=0.0004, fout = fout_tag)
+    alrm, altm, chim = Xism_arat_1C_an(
+        dv, invc, rl, mod, dvb, invcb, rlb, 
+        armin=1.010, armax=1.060, spar=0.0004,
+        atmin=1.005, atmax=1.035, spat=0.0004, fout = fout_tag)
     print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
     return alrm, altm
 

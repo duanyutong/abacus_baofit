@@ -783,7 +783,7 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
         # read in all xi files for all phases
         xi_list = [np.loadtxt(path)[:, 1] for path in paths]
         # as cov gets smaller, chisq gets bigger, contour gets smaller
-        cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
+        cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
         # save cov
         filepath = os.path.join(  # save to coadd folder for all phases
                 save_dir,
@@ -794,7 +794,7 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 
     # calculate monoquad cov for baofit
     xi_list = []
-    for phase in phases:
+    for phase in cov_phases:
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
         paths0 = sorted(glob(os.path.join(
                         save_dir, sim_name, 'z{}-r*'.format(redshift),
@@ -809,7 +809,8 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
             xi_0 = np.loadtxt(path0)[:, 1]
             xi_2 = np.loadtxt(path2)[:, 1]
             xi_list.append(np.hstack((xi_0, xi_2)))
-    cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1)
+        print('list length now: ', len(xi_list))
+    cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
     # save cov
     filepath = os.path.join(  # save to coadd folder for all phases
             save_dir,
@@ -977,14 +978,14 @@ def run_baofit_parallel(baofit_phases=range(16)):
 if __name__ == "__main__":
 
     # halocats = fit_c_median(phases=phases)
-    for phase in phases:
-        try:
-            halocat = halocats[phase]
-        except NameError:
-            halocat = make_halocat(phase)
-            halocat = process_rockstar_halocat(halocat, N_cut)
-        for model_name in model_names:
-            do_realisations(halocat, model_name, phase, N_reals)
+    # for phase in phases:
+    #     try:
+    #         halocat = halocats[phase]
+    #     except NameError:
+    #         halocat = make_halocat(phase)
+    #         halocat = process_rockstar_halocat(halocat, N_cut)
+    #     for model_name in model_names:
+    #         do_realisations(halocat, model_name, phase, N_reals)
 
     for model_name in model_names:
         do_coadd_phases(model_name, coadd_phases=range(16))
