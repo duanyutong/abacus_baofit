@@ -1,35 +1,107 @@
-\documentclass[10pt,A4]{aastex62}
-\usepackage{ucs}
-%\usepackage{newtxtext,newtxmath}
+% mnras_template.tex 
+%
+% LaTeX template for creating an MNRAS paper
+%
+% v3.0 released 14 May 2015
+% (version numbers match those of mnras.cls)
+%
+% Copyright (C) Royal Astronomical Society 2015
+% Authors:
+% Keith T. Smith (Royal Astronomical Society)
+
+% Change log
+%
+% v3.0 May 2015
+%    Renamed to match the new package name
+%    Version number matches mnras.cls
+%    A few minor tweaks to wording
+% v1.0 September 2013
+%    Beta testing only - never publicly released
+%    First version: a simple (ish) template for creating an MNRAS paper
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Basic setup. Most papers should leave these options alone.
+\documentclass[fleqn,usenatbib]{mnras}
+
+% MNRAS is set in Times font. If you don't have this installed (most LaTeX
+% installations will be fine) or prefer the old Computer Modern fonts, comment
+% out the following line
+\usepackage{newtxtext,newtxmath}
 % Depending on your LaTeX fonts installation, you might get better results with one of these:
 %\usepackage{mathptmx}
-\usepackage{amsfonts,amssymb,amsmath}
-\usepackage{txfonts}
-%\usepackage[T1]{fontenc}
+%\usepackage{txfonts}
+
+% Use vector fonts, so it zooms properly in on-screen viewing software
+% Don't change these lines unless you know what you are doing
+\usepackage[T1]{fontenc}
+\usepackage{ae,aecompl}
+
+
+%%%%% AUTHORS - PLACE YOUR OWN PACKAGES HERE %%%%%
+
+% Only include extra packages if you really need them. Common packages are:
 \usepackage{graphicx}	% Including figure files
+\usepackage{amsmath}	% Advanced maths commands
+\usepackage{amssymb}	% Extra maths symbols
+% \usepackage{fourier}
 \usepackage{commath}
-
-\usepackage{savesym}
-\savesymbol{tablenum}
 \usepackage[alsoload=astro]{siunitx}
-\restoresymbol{SIX}{tablenum}
-
 \usepackage{hyperref}
 \usepackage{bm}
 \newcommand{\rvline}{\hspace*{-\arraycolsep}\vline\hspace*{-\arraycolsep}}
 
-\begin{document}
-\title{Notes on Abacus BAO Analyses}
-\correspondingauthor{Duan Yutong}
-\email{dyt@physics.bu.edu}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\author[0000-0002-0786-7307]{Duan Yutong}
-\affil{Boston University}
+%%%%% AUTHORS - PLACE YOUR OWN COMMANDS HERE %%%%%
+
+% Please keep new commands to a minimum, and use \newcommand not \def to avoid
+% overwriting existing commands. Example:
+%\newcommand{\pcm}{\,cm$^{-2}$}	% per cm-squared
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%% TITLE PAGE %%%%%%%%%%%%%%%%%%%
+
+% Title of the paper, and the short title which is used in the headers.
+% Keep the title short and informative.
+\title{Notes On Abacus BAO Analysis}
+
+% The list of authors, and the short list which is used in the headers.
+% If you need two or more lines of authors, add an extra line using \newauthor
+\author[YT. Duan et al.]{
+Yutong Duan $^{1}$\thanks{E-mail: dyt@physics.bu.edu}
+% A. N. Other,$^{2}$
+% Third Author$^{2,3}$
+% and Fourth Author$^{3}$
+\\
+% List of institutions
+% $^{1}$Royal Astronomical Society, Burlington House, Piccadilly, London W1J 0BQ, UK\\
+% $^{2}$Department, Institution, Street Address, City Postal Code, Country\\
+% $^{3}$Another Department, Different Institution, Street Address, City Postal Code, Country
+}
+
+% These dates will be filled out by the publisher
+\date{Accepted XXX. Received YYY; in original form ZZZ}
+
+% Enter the current year, for the copyright statements etc.
+\pubyear{2018}
+
+% Don't change these lines
+\begin{document}
+\label{firstpage}
+\pagerange{\pageref{firstpage}--\pageref{lastpage}}
+\maketitle
 
 % Abstract of the paper
 \begin{abstract}
 This serves as detailed notes on the procedures of BAO analysis with AbacusCosmos to accompany the code. Part 1 is on the calculation of correlation functions and covariance matrices. Part 2 is on the fitting methods of the BAO fitter.
 \end{abstract}
+
+% Select between one and six entries from the list of approved keywords.
+% Don't make up new ones.
+\begin{keywords}
+keyword1 -- keyword2 -- keyword3
+\end{keywords}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -351,7 +423,8 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 %%%%%%%%%%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%%%%
 
 % The best way to enter references is to use BibTeX:
-%\bibliographystyle{abbrv}
+
+\bibliographystyle{mnras}
 \bibliography{ref} % if your bibtex file is called example.bib
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -391,5 +464,12 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 		R_1 D_2 = \frac{N_\text{R1} N_\text{D2}}{V_1} \dif V(s, \mu) = \bar{n}_\text{R1} N_\text{D2} \dif V(s, \mu).
 	\end{equation}
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
+% Don't change these lines
+\bsp	% typesetting comment
+\label{lastpage}
 \end{document}
+
+% End of mnras_template.tex

@@ -23,17 +23,15 @@ from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
 from Corrfunc.theory.wp import wp
 from abacus_hod import initialise_model, populate_model, vrange
-
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+# plt.switch_backend('Agg')  # switch this on if backend error is reported
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'z0.5'  # 'z0.5'
-phases = range(5, 16)  # range(16)  # [0, 1] # list(range(16))
+tagout = 'ls'  # 'z0.5'
+phases = range(2)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -42,8 +40,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_s1', 'gen_sv1', 'gen_sp1',
                'gen_s1_n', 'gen_sv1_n', 'gen_sp1_n',
                'gen_vel1', 'gen_allbiases', 'gen_allbiases_n']
-# model_names = ['gen_base1']
-N_reals = 16  # number of realisations for an HOD
+model_names = ['gen_base1']
+N_reals = 1  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_threads = 3  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dWimension
@@ -53,7 +51,7 @@ reuse_galaxies = True
 save_hod_realisation = True
 use_analytic_randoms = True
 use_jackknife = True
-add_rsd = True
+add_rsd = False
 debug_mode = False
 
 # %% bin settings
@@ -75,61 +73,42 @@ halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
-
 # # %% MP Class
 # class NoDaemonProcess(Process):
 #     # make 'daemon' attribute always return False
 #     def _get_daemon(self):
 #         return False
-
 #     def _set_daemon(self, value):
 #         pass
 #     daemon = property(_get_daemon, _set_daemon)
-
-
 # # We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
 # # because the latter is only a wrapper function, not a proper class.
 # class Pool(pool.Pool):
-
 #     Process = NoDaemonProcess
 
 
 # %% definitionss of statisical formulae
-def auto_analytic_random_smu(ND, s_bins, mu_bins, V):
-
+def analytic_random(ND1, NR1, ND2, NR2, s_bins, mu_bins, V):
     '''
-    DD and RR for auto-correlations
-    assume NR = ND for analytic calculations, an arbitrary choice.
-    doesn't matter as long as number densities are the same n_R = n_D
+    V is the global volume L^3
+    for auto-correlation, we may set ND1 = NR1 = ND2 = NR2
+    for cross-correlation, returns D1R2 and R1D2 for LS estimator
     '''
 
-    NR = ND
     mu_bins_reverse_sorted = np.sort(mu_bins)[::-1]
     dv = spherical_sector_volume(s_bins, mu_bins_reverse_sorted)
     dv = np.diff(dv, axis=1)  # volume of wedges
     dv = np.diff(dv, axis=0)  # volume of wedge sector
-    DR = ND*(ND-1)/V*dv  # calculate randoms for sample1 and 2
-    RR = NR*(NR-1)/V*dv  # calculate the random-random pairs.
-    return DR, RR
-
-
-def cross_analytic_random(NR1, ND2, s_bins, mu_bins, V1):
-    '''
-    DR for cross-correlations betewen random_1 and data_2
-    NR1 is the random sample for the box, V1 is L^3, and ND2 is the subsample
-    '''
-    mu_bins_reverse_sorted = np.sort(mu_bins)[::-1]
-    dv = spherical_sector_volume(s_bins, mu_bins_reverse_sorted)
-    dv = np.diff(dv, axis=1)  # volume of wedges
-    dv = np.diff(dv, axis=0)  # volume of wedge sector
-    R1D2 = NR1*ND2/V1*dv
-
-    return R1D2
+    DR = ND1*NR2/V*dv
+    RD = NR1*ND2/V*dv
+    RR = NR1*NR2/V*dv  # calculate the random-random pairs
+    return DR, RD, RR
 
 
 def ph_estimator(ND, NR, DD, RR):
 
     '''
+    Peebles-Hauser
     DD/RR - 1, a.k.a natural estimator
     for auto-correlation only
     '''
@@ -149,6 +128,19 @@ def dp_estimator(nD1, nR1, D1D2, R1D2):
     lower case n is the number density
     '''
     xi = nR1/nD1*D1D2/R1D2 - 1
+    return xi
+
+
+def ls_estimator(ND1, NR1, ND2, NR2, DD, DR, RD, RR):
+
+    '''
+    generalised Landy & Szalay (1993) estimator for cross-correlation
+    reduces to (DD-2DR+RR)RR in case of auto-correlation if we set
+    ND1 = ND2, NR1 = NR1, and DR = RD
+
+    ref: http://d-scholarship.pitt.edu/20997/1/DanMatthews_thesis.pdf
+    '''
+    xi = (DD*(NR1*NR2/ND1/ND2) - DR*(NR1/ND1) - RD*(NR2/ND2) + RR) / RR
     return xi
 
 
@@ -415,12 +407,12 @@ def fit_c_median(phases=range(16)):
     return halocats
 
 
-def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
+def do_auto_count(model, mode='smu'):
     # do the pair counting in 1 Mpc bins
 
     sim_name = model.mock.header['SimName']
     L = model.mock.BoxSize
-    # Lbox = model.mock.Lbox
+    Lbox = model.mock.Lbox
     redshift = model.mock.redshift
     model_name = model.model_name
     x = model.mock.galaxy_table['x']
@@ -434,33 +426,35 @@ def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
     # and the npy file saved are exactly the same and can be recovered
     # otherwise, with c_api_timer enabled, file is in "object" format,
     # not proper datatypes, and will cause indexing issues
-    if do_DD:
-        if mode == 'smu':
-            # print('Auto-correlation smu pair counting for entire box with {}'
-            #       ' threads...'.format(N_threads))
-            DD = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       x, y, z, periodic=True, verbose=False, boxsize=L,
-                       output_savg=True, c_api_timer=False)
-        elif mode == 'wp':  # also returns wp in addition to counts
-            # print('Auto-correlation wp pair counting for entire box with {}'
-            #       ' threads...'.format(N_threads))
-            DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
-                    output_rpavg=True, verbose=False, c_api_timer=False)
-        # save counting results as original structured array in npy format
-        np.save(os.path.join(filedir,
-                             '{}-auto-paircount-DD-{}.npy'
-                             .format(model_name, mode)),
-                DD)
-    # calculate RR analytically for auto-correlation, in coarse bins
-    if do_RR:
+    if mode == 'smu':
+        # print('Auto-correlation smu pair counting for entire box with {}'
+        #       ' threads...'.format(N_threads))
+        DD = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                   x, y, z, periodic=True, verbose=False, boxsize=L,
+                   output_savg=True, c_api_timer=False)
         ND = len(model.mock.galaxy_table)
-        if mode == 'smu':
-            _, RR = auto_analytic_random_smu(ND, s_bins, mu_bins, L**3)
-            # save counting results as original structured array in npy format
+        if use_analytic_randoms:
+            DR, _, RR = analytic_random(
+                    ND, ND, ND, ND, s_bins, mu_bins, Lbox.prod())
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-DR-{}.txt'
+                                    .format(model_name, mode)),
+                       DR, fmt=txtfmt)
             np.savetxt(os.path.join(filedir,
                                     '{}-auto-paircount-RR-{}.txt'
                                     .format(model_name, mode)),
                        RR, fmt=txtfmt)
+    elif mode == 'wp':  # also returns wp in addition to counts
+        # print('Auto-correlation wp pair counting for entire box with {}'
+        #       ' threads...'.format(N_threads))
+        DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
+                output_rpavg=True, verbose=False, c_api_timer=False)
+    # save counting results as original structured array in npy format
+    np.save(os.path.join(filedir,
+                         '{}-auto-paircount-DD-{}.npy'
+                         .format(model_name, mode)),
+            DD)
+    # calculate RR analytically for auto-correlation, in coarse bins
     if not use_analytic_randoms or debug_mode:
         if mode == 'smu':
             ND = len(model.mock.galaxy_table)
@@ -468,98 +462,94 @@ def do_auto_count(model, do_DD=True, do_RR=True, mode='smu'):
             xr = np.random.uniform(0, L, NR).astype(np.float32)
             yr = np.random.uniform(0, L, NR).astype(np.float32)
             zr = np.random.uniform(0, L, NR).astype(np.float32)
+            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       x, y, z, X2=xr, Y2=yr, Z2=zr,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
             RR = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr, yr, zr, periodic=True, verbose=False,
-                       output_savg=True, boxsize=L, c_api_timer=False)
+                       xr, yr, zr,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
+                                 .format(model_name, mode)),
+                    DR)
             np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
                                  .format(model_name, mode)),
                     RR)
 
 
-def do_subcross_count(model, N_sub, do_DD=True, do_DR=True):
+def do_subcross_count(model, N_sub):
 
     sim_name = model.mock.header['SimName']
     model_name = model.model_name
     L = model.mock.BoxSize
+    L_sub = L / N_sub  # length of subvolume box
     Lbox = model.mock.Lbox
     redshift = model.mock.redshift
-    l_sub = L / N_sub  # length of subvolume box
     gtab = model.mock.galaxy_table
     x1, y1, z1 = gtab['x'], gtab['y'], gtab['z']
     ND1 = len(gtab)  # number of galaxies in entire volume of periodic box
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
-
+    model.ND2 = []
     for i, j, k in product(range(N_sub), repeat=3):
-
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        mask = ((l_sub * i < gtab['x']) & (gtab['x'] <= l_sub * (i+1)) &
-                (l_sub * j < gtab['y']) & (gtab['y'] <= l_sub * (j+1)) &
-                (l_sub * k < gtab['z']) & (gtab['z'] <= l_sub * (k+1)))
+        mask = ((L_sub * i < gtab['x']) & (gtab['x'] <= L_sub * (i+1)) &
+                (L_sub * j < gtab['y']) & (gtab['y'] <= L_sub * (j+1)) &
+                (L_sub * k < gtab['z']) & (gtab['z'] <= L_sub * (k+1)))
         gt_sub = gtab[mask]  # select a subvolume of the galaxy table
         ND2 = len(gt_sub)  # number of galaxies in the subvolume
+        model.ND2.append(ND2)
+        x2, y2, z2 = gt_sub['x'], gt_sub['y'], gt_sub['z']
+        DD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                   x1, y1, z1, X2=x2, Y2=y2, Z2=z2,
+                   periodic=True, output_savg=True, verbose=False,
+                   boxsize=L, c_api_timer=False)
+        np.save(os.path.join(filedir,
+                             '{}-cross_{}-paircount-DD.npy'
+                             .format(model_name, linind)),
+                DD)
 
-        if do_DD:
-            # print('Subvolume {} of {} mask created, '
-            #       '{} of {} galaxies selected'
-            #       .format(linind+1, np.power(N_sub, 3),
-            #               len(gt_sub), len(gt)))
-            # print('Actual min/max x, y, z of galaxy sample:'
-            #       '({:3.2f}, {:3.2f}, {:3.2f}),'
-            #       '({:3.2f}, {:3.2f}, {:3.2f})'
-            #       .format(np.min(gt_sub['x']),
-            #               np.min(gt_sub['y']),
-            #               np.min(gt_sub['z']),
-            #               np.max(gt_sub['x']),
-            #               np.max(gt_sub['y']),
-            #               np.max(gt_sub['z'])))
-            # print('Cross-correlation pair counting for subvolume'
-            #       + 'with {} threads...'.format(N_threads))
-            # calculate D1D2, where D1 is entire box, and D2 is subvolume
-            x2, y2, z2 = gt_sub['x'], gt_sub['y'], gt_sub['z']
-            D1D2 = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                         x1, y1, z1, periodic=True, X2=x2, Y2=y2, Z2=z2,
-                         output_savg=True, verbose=False,
-                         boxsize=L, c_api_timer=False)
-            np.save(os.path.join(filedir,
-                                 '{}-cross_{}-paircount-D1D2.npy'
-                                 .format(model_name, linind)),
-                    D1D2)
-
-        if do_DR:
-            NR1 = ND1
-            # the time trade off is ~5 minutes
-            if use_analytic_randoms or debug_mode:
-                # calculate cross-correlation DR analytically
-                # similar code can be found in halotools:
-                # https://goo.gl/W9Njbv
-                R1D2 = cross_analytic_random(NR1, ND2,
-                                             s_bins, mu_bins, Lbox.prod())
+        # the time trade off is ~5 minutes for ND=NR
+        if use_analytic_randoms:
+            DR, RD, RR = analytic_random(
+                    ND1, ND1, ND2, ND2, s_bins, mu_bins, Lbox.prod())
+            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
                 np.savetxt(os.path.join(filedir,
-                                        '{}-cross_{}-paircount-R1D2.txt'
-                                        .format(model_name, linind)),
-                           R1D2, fmt=txtfmt)
+                                        '{}-cross_{}-paircount-{}.txt'
+                                        .format(model_name, linind, tag)),
+                           output, fmt=txtfmt)
 
-            if not use_analytic_randoms or debug_mode:
-                # calculate D2Rbox by brute force sampling, where
-                # Rbox sample is homogeneous in volume of box
-                print('Pair counting R1D2 with Corrfunc.DDsmu, '
-                      '{} threads...'
-                      .format(N_threads))
-                # force float32 (a.k.a. single precision float in C)
-                # to be consistent with galaxy table precision
-                # otherwise corrfunc raises an error
-                xr = np.random.uniform(0, L, NR1).astype(np.float32)
-                yr = np.random.uniform(0, L, NR1).astype(np.float32)
-                zr = np.random.uniform(0, L, NR1).astype(np.float32)
-                R1D2 = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                             xr, yr, zr, periodic=True, X2=x2, Y2=y2, Z2=z2,
-                             verbose=False, output_savg=True,
-                             boxsize=L, c_api_timer=False)
+        if not use_analytic_randoms or debug_mode:
+            # calculate D2Rbox by brute force sampling, where
+            # Rbox sample is homogeneous in volume of box
+            # force float32 (a.k.a. single precision float in C)
+            # to be consistent with galaxy table precision
+            # otherwise corrfunc raises an error
+            NR1, NR2 = ND1, ND2
+            xr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+            yr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+            zr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+            xr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+            yr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+            zr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            RD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       xr1, yr1, zr1, X2=x2, Y2=y2, Z2=z2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            RR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       xr1, yr1, zr1, X2=xr2, Y2=yr2, Z2=zr2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
                 np.save(os.path.join(filedir,
-                                     '{}-cross_{}-paircount-R1D2.npy'
-                                     .format(model_name, linind)),
-                        R1D2)
+                                     '{}-cross_{}-paircount-{}.npy'
+                                     .format(model_name, linind, tag)),
+                        output)
 
 
 def do_auto_correlation(model, mode='smu'):
@@ -580,52 +570,51 @@ def do_auto_correlation(model, mode='smu'):
 
     if mode == 'smu':
         # read in pair counts file which has fine bins
-        DD = np.load(os.path.join(filedir,
-                                  '{}-auto-paircount-DD-smu.npy'
-                                  .format(model_name)))
+        DDnpy = np.load(os.path.join(filedir,
+                                     '{}-auto-paircount-DD-smu.npy'
+                                     .format(model_name)))
         ND = len(model.mock.galaxy_table)
-        NR = ND
-        # re-count pairs in new bins, re-bin the counts
-        # print('Re-binning auto DD counts into ({}, {})...'
-        #       .format(s_bins.size-1, mu_bins.size-1))
-        npairs_DD, savg = rebin_smu_counts(DD)
-        # save re-binned pair ounts
+        # re-count pairs in new bins
+        DD, savg = rebin_smu_counts(DDnpy)
         np.savetxt(os.path.join(filedir, '{}-auto-paircount-DD-{}-rebinned.txt'
                                 .format(model_name, mode)),
-                   npairs_DD, fmt=txtfmt)
+                   DD, fmt=txtfmt)
         if use_analytic_randoms:
-            filepath2 = os.path.join(filedir,
-                                     '{}-auto-paircount-RR-{}.txt'
-                                     .format(model_name, mode))
-            npairs_RR = np.loadtxt(filepath2)
+            DR = np.loadtxt(os.path.join(filedir,
+                                         '{}-auto-paircount-DR-{}.txt'
+                                         .format(model_name, mode)))
+            RR = np.loadtxt(os.path.join(filedir,
+                                         '{}-auto-paircount-RR-{}.txt'
+                                         .format(model_name, mode)))
         if not use_analytic_randoms or debug_mode:
             # rebin RR.npy counts
-            RR = np.load(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
-                                      .format(model_name, mode)))
-            npairs_RR, _ = rebin_smu_counts(RR)
-            # save re-binned pair ounts
+            DRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
+                                         .format(model_name, mode)))
+            RRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
+                                         .format(model_name, mode)))
+            DR, _ = rebin_smu_counts(DRnpy)
+            RR, _ = rebin_smu_counts(RRnpy)
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-DR-{}-rebinned.txt'
+                                    .format(model_name, mode)),
+                       DR, fmt=txtfmt)
             np.savetxt(os.path.join(
                     filedir,
                     '{}-auto-paircount-RR-{}-rebinned.txt'
                     .format(model_name, mode)),
-                npairs_RR, fmt=txtfmt)
-        xi_s_mu = ph_estimator(ND, NR, npairs_DD, npairs_RR)
+                RR, fmt=txtfmt)
+        xi_s_mu = ls_estimator(ND, ND, ND, ND, DD, DR, DR, RR)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         # create r vector from weighted average of DD pair counts
-        savg_vec = np.sum(savg * npairs_DD, axis=1) / np.sum(npairs_DD, axis=1)
+        savg_vec = np.sum(savg * DD, axis=1) / np.sum(DD, axis=1)
         xi_0_txt = np.vstack([savg_vec, xi_0]).T
         xi_2_txt = np.vstack([savg_vec, xi_2]).T
-        # save to text
-        np.savetxt(os.path.join(filedir, '{}-auto-xi_s_mu.txt'
-                                .format(model_name)),
-                   xi_s_mu, fmt=txtfmt)
-        np.savetxt(os.path.join(filedir, '{}-auto-xi_0.txt'
-                                .format(model_name)),
-                   xi_0_txt, fmt=txtfmt)
-        np.savetxt(os.path.join(filedir, '{}-auto-xi_2.txt'
-                                .format(model_name)),
-                   xi_2_txt, fmt=txtfmt)
+        for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
+                               ['xi_s_mu', 'xi_0', 'xi_2']):
+            np.savetxt(os.path.join(filedir, '{}-auto-{}.txt'
+                                    .format(model_name, tag)),
+                       output, fmt=txtfmt)
         return xi_s_mu, xi_0_txt, xi_2_txt
 
     elif mode == 'wp':  # read npy counts and create txt file
@@ -648,7 +637,6 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
 #          .format(model.r))
     # setting halocat properties to be compatibble with halotools
     sim_name = model.mock.header['SimName']
-    Lbox = model.mock.Lbox
     redshift = model.mock.redshift
     model_name = model.model_name
     gt = model.mock.galaxy_table
@@ -658,64 +646,60 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
     mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
-
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index
-
+        ND2 = model.ND2[linind]
         # read in pair counts file which has fine bins
-        D1D2 = np.load(os.path.join(filedir,
-                                    '{}-cross_{}-paircount-D1D2.npy'
-                                    .format(model_name, linind)))
-        # print('Re-binning {} of {} cross-correlation into ({}, {})...'
-        #       .format(linind+1, N_sub**3, s_bins.size-1, mu_bins.size-1))
+        DDnpy = np.load(os.path.join(filedir,
+                                     '{}-cross_{}-paircount-DD.npy'
+                                     .format(model_name, linind)))
         # set up bins using specifications, re-bin the counts
-        npairs_D1D2, _ = rebin_smu_counts(D1D2)
-        # save re-binned pair ounts
+        DD, _ = rebin_smu_counts(DDnpy)
         np.savetxt(os.path.join(filedir,
-                                '{}-cross_{}-paircount-D1D2-rebinned.txt'
+                                '{}-cross_{}-paircount-DD-rebinned.txt'
                                 .format(model_name, linind)),
-                   npairs_D1D2, fmt=txtfmt)
-
-        # read R1D2 counts and re-bin
+                   DD, fmt=txtfmt)
+        # read DR, RD, and RR counts and re-bin
         if use_analytic_randoms:
-            npairs_R1D2 = np.loadtxt(
-                os.path.join(filedir, '{}-cross_{}-paircount-R1D2.txt'
-                             .format(model_name, linind)))
+            DR = np.loadtxt(
+                    os.path.join(filedir, '{}-cross_{}-paircount-DR.txt'
+                                 .format(model_name, linind)))
+            RD = np.loadtxt(
+                    os.path.join(filedir, '{}-cross_{}-paircount-RD.txt'
+                                 .format(model_name, linind)))
+            RR = np.loadtxt(
+                    os.path.join(filedir, '{}-cross_{}-paircount-RR.txt'
+                                 .format(model_name, linind)))
         if not use_analytic_randoms or debug_mode:
-            R1D2 = np.load(os.path.join(filedir,
-                                        '{}-cross_{}-paircount-R1D2.npy'
-                                        .format(model_name, linind)))
-            npairs_R1D2, _ = rebin_smu_counts(R1D2)
-            # save re-binned pair ounts
-            np.savetxt(os.path.join(
-                    filedir,
-                    '{}-cross_{}-paircount-R1D2-rebinned.txt'
-                    .format(model_name, linind)),
-                npairs_R1D2, fmt=txtfmt)
-
+            DRnpy = np.load(os.path.join(filedir,
+                                         '{}-cross_{}-paircount-DR.npy'
+                                         .format(model_name, linind)))
+            RDnpy = np.load(os.path.join(filedir,
+                                         '{}-cross_{}-paircount-RD.npy'
+                                         .format(model_name, linind)))
+            RRnpy = np.load(os.path.join(filedir,
+                                         '{}-cross_{}-paircount-RR.npy'
+                                         .format(model_name, linind)))
+            DR, _ = rebin_smu_counts(DRnpy)
+            RD, _ = rebin_smu_counts(RDnpy)
+            RR, _ = rebin_smu_counts(RRnpy)
+            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
+                np.savetxt(os.path.join(filedir,
+                                        '{}-cross_{}-paircount-{}-rebinned.txt'
+                                        .format(model_name, linind, tag)),
+                           output, fmt=txtfmt)
         # calculate cross-correlation from counts using dp estimator
-        nD1 = ND1 / Lbox.prod()
-        nR1 = nD1
-        xi_s_mu = dp_estimator(nD1, nR1, npairs_D1D2, npairs_R1D2)
-
-        # print('Calculating cross-correlation for subvolume {} of {}...'
-        #       .format(linind+1, np.power(N_sub, 3)))
+        xi_s_mu = ls_estimator(ND1, ND1, ND2, ND2, DD, DR, RD, RR)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
         xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
-        # save to text
-        np.savetxt(os.path.join(filedir,
-                                '{}-cross_{}-xi_s_mu.txt'
-                                .format(model_name, linind)),
-                   xi_s_mu, fmt=txtfmt)
-        np.savetxt(os.path.join(filedir, '{}-cross_{}-xi_0.txt'
-                                .format(model_name, linind)),
-                   xi_0_txt, fmt=txtfmt)
-        np.savetxt(os.path.join(filedir,
-                                '{}-cross_{}-xi_2.txt'
-                                .format(model_name, linind)),
-                   xi_2_txt, fmt=txtfmt)
+        for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
+                               ['xi_s_mu', 'xi_0', 'xi_2']):
+            np.savetxt(os.path.join(filedir,
+                                    '{}-cross_{}-{}.txt'
+                                    .format(model_name, linind, tag)),
+                       output, fmt=txtfmt)
 
 
 def do_coadd_phases(model_name, coadd_phases=range(16)):
@@ -738,35 +722,30 @@ def do_coadd_phases(model_name, coadd_phases=range(16)):
         xi_0_list_phases.append(np.loadtxt(path_xi_0))
         xi_2_list_phases.append(np.loadtxt(path_xi_2))
         wp_list_phases.append(np.loadtxt(path_wp))
-    # create save dir
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    # perform coadding for two cases
     outputs = coadd_xi_list([xi_list_phases, xi_0_list_phases,
                              xi_2_list_phases, wp_list_phases])
-    fouttags = [
-        'xi_s_mu-ca', 'xi_s_mu-err', 'xi_0-ca', 'xi_0-err',
-        'xi_2-ca',    'xi_2-err',    'wp-ca',   'wp-err']
-    for output, fouttag in zip(outputs, fouttags):
+    tags = ['xi_s_mu-ca', 'xi_s_mu-err', 'xi_0-ca', 'xi_0-err',
+            'xi_2-ca',    'xi_2-err',    'wp-ca',   'wp-err']
+    for output, tag in zip(outputs, tags):
         np.savetxt(os.path.join(filedir,
-                                '{}-auto-{}.txt'.format(model_name, fouttag)),
+                                '{}-auto-{}.txt'.format(model_name, tag)),
                    output, fmt=txtfmt)
     if use_jackknife:
         for phase in coadd_phases:
-            # print('Jackknife coadding xi, dropping phase {}...'
-            # .format(phase))
             xi_list = xi_list_phases[:phase] + xi_list_phases[phase+1:]
             xi_0_list = xi_0_list_phases[:phase] + xi_0_list_phases[phase+1:]
             xi_2_list = xi_2_list_phases[:phase] + xi_2_list_phases[phase+1:]
             wp_list = wp_list_phases[:phase] + wp_list_phases[phase+1:]
             outputs = coadd_xi_list([xi_list, xi_0_list, xi_2_list, wp_list])
-            for output, fouttag in zip(outputs, fouttags):
+            for output, tag in zip(outputs, tags):
                 np.savetxt(os.path.join(filedir,
                                         '{}-auto-{}-jackknife_{}.txt'
-                                        .format(model_name, fouttag, phase)),
+                                        .format(model_name, tag, phase)),
                            output, fmt=txtfmt)
 
 
@@ -809,7 +788,6 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
             xi_0 = np.loadtxt(path0)[:, 1]
             xi_2 = np.loadtxt(path2)[:, 1]
             xi_list.append(np.hstack((xi_0, xi_2)))
-        print('list length now: ', len(xi_list))
     cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
     # save cov
     filepath = os.path.join(  # save to coadd folder for all phases
@@ -881,11 +859,11 @@ def do_realisation(r, model_name):
                 '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
                 format='ascii.fast_csv', overwrite=True)
             # perform statistics on model.mock.galaxy_table
-            do_auto_count(model, do_DD=True, do_RR=True, mode='smu')
-            do_subcross_count(model, N_sub=N_sub, do_DD=True, do_DR=True)
+            do_auto_count(model, mode='smu')
+            do_subcross_count(model, N_sub=N_sub)
             xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
             do_subcross_correlation(model, N_sub=N_sub)
-            do_auto_count(model, do_DD=True, do_RR=True, mode='wp')
+            do_auto_count(model, mode='wp')
             wp = do_auto_correlation(model, mode='wp')
             print('Finished r = {}.'.format(r))
     except Exception as E:
@@ -978,18 +956,18 @@ def run_baofit_parallel(baofit_phases=range(16)):
 if __name__ == "__main__":
 
     # halocats = fit_c_median(phases=phases)
-    # for phase in phases:
-    #     try:
-    #         halocat = halocats[phase]
-    #     except NameError:
-    #         halocat = make_halocat(phase)
-    #         halocat = process_rockstar_halocat(halocat, N_cut)
-    #     for model_name in model_names:
-    #         do_realisations(halocat, model_name, phase, N_reals)
+    for phase in phases:
+        try:
+            halocat = halocats[phase]
+        except NameError:
+            halocat = make_halocat(phase)
+            halocat = process_rockstar_halocat(halocat, N_cut)
+        for model_name in model_names:
+            do_realisations(halocat, model_name, phase, N_reals)
 
     for model_name in model_names:
-        do_coadd_phases(model_name, coadd_phases=range(16))
-        do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
-    # combine_galaxy_table_metadata()
+        do_coadd_phases(model_name, coadd_phases=phases)
+        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+    combine_galaxy_table_metadata()
 
-    run_baofit_parallel(baofit_phases=range(16))
+    # run_baofit_parallel(baofit_phases=range(16))

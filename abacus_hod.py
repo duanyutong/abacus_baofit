@@ -20,7 +20,6 @@ import numpy as np
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
-# from tqdm import trange
 
 
 def vrange(starts, lengths):
@@ -487,7 +486,7 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
 
 def make_galaxies(model, add_rsd=True, N_threads=10):
 
-    h = (model.mock.cosmology.H0/100).value
+    h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
     htab = model.mock.halo_table
     N_halos = len(htab)  # total number of host halos available
     # remove existing galaxy table, because modifying it is too painfully slow
@@ -646,7 +645,7 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         1 - 2*ptab['rank_s_p'][mask] / (ptab['halo_subsamp_len'][mask]-1))
     # select particles which host satellites
     mask_sat = ptab['N_sat_rand'] < ptab['N_sat_model']
-    # correct for RSD
+    # add RSD to mock sample
     if add_rsd:
         z = do_rsd(ptab['z'][mask_sat]/h, ptab['vz'][mask_sat],
                    model.mock.redshift, model.mock.cosmology,
