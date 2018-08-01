@@ -155,7 +155,7 @@ def rebin_smu_counts(cts):
     '''
 
     npairs = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
-    savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
+    savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.float64)
     bins_included = 0
     for m, n in product(range(npairs.shape[0]), range(npairs.shape[1])):
         # smin and smax fields can be equal to bin edge
