@@ -140,40 +140,39 @@ def rank_halo_particles(arr):
 #     return np.concatenate(rank)
 
 
-def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
+def process_particle_props(pt, h, halo_m_prop='halo_mvir',
                            max_iter=10, precision=0.1):
 
     # add host_centric_distance for all particles for bias s
-    ptab['x_rel'] = ptab['x'] - ptab['halo_x']  # Mpc/h
-    ptab['y_rel'] = ptab['y'] - ptab['halo_y']  # Mpc/h
-    ptab['z_rel'] = ptab['z'] - ptab['halo_z']  # Mpc/h
+    pt['x_rel'] = pt['x'] - pt['halo_x']  # Mpc/h
+    pt['y_rel'] = pt['y'] - pt['halo_y']  # Mpc/h
+    pt['z_rel'] = pt['z'] - pt['halo_z']  # Mpc/h
     # r in kpc
-    r_rel = np.array([ptab['x_rel'], ptab['y_rel'], ptab['z_rel']]).T*1e3
-    ptab['r_centric'] = np.linalg.norm(r_rel, axis=1)  # kpc/h
+    r_rel = np.array([pt['x_rel'], pt['y_rel'], pt['z_rel']]).T*1e3
+    pt['r_centric'] = np.linalg.norm(r_rel, axis=1)  # kpc/h
     # add peculiar velocity and speed columns for bias s_v
-    ptab['vx_pec'] = ptab['vx'] - ptab['halo_vx']
-    ptab['vy_pec'] = ptab['vy'] - ptab['halo_vy']
-    ptab['vz_pec'] = ptab['vz'] - ptab['halo_vz']
-    v_pec = np.array([ptab['vx_pec'], ptab['vy_pec'], ptab['vz_pec']]).T
+    pt['vx_pec'] = pt['vx'] - pt['halo_vx']
+    pt['vy_pec'] = pt['vy'] - pt['halo_vy']
+    pt['vz_pec'] = pt['vz'] - pt['halo_vz']
+    v_pec = np.array([pt['vx_pec'], pt['vy_pec'], pt['vz_pec']]).T
     # for some particles close to halo centre due to single precision, we find
     # v_pec = v_rad = v_tan = 0, and r_0 = r_min
-    ptab['v_pec'] = np.linalg.norm(v_pec, axis=1)  # peculiar speed km/s
+    pt['v_pec'] = np.linalg.norm(v_pec, axis=1)  # peculiar speed km/s
     # dimensionless r relative hat
     norm = np.linalg.norm(r_rel, axis=1)
     norm = norm.reshape(len(norm), 1)  # reshape it into a column vector
     r_rel_hat = r_rel / norm
-    ptab['v_rad'] = np.sum(np.multiply(v_pec, r_rel_hat), axis=1)  # dot prod
-    ptab['v_tan'] = np.sqrt(np.square(ptab['v_pec'])
-                            - np.square(ptab['v_rad']))
+    pt['v_rad'] = np.sum(np.multiply(v_pec, r_rel_hat), axis=1)  # dot prod
+    pt['v_tan'] = np.sqrt(np.square(pt['v_pec']) - np.square(pt['v_rad']))
     # calculate perihelion distance for bias s_p, note h factors
     G_N = 6.674e-11  # G newton in m3, s-2, kg-1
     M_sun = 1.98855e30  # solar mass in kg
     kpc = 3.0857e19  # kpc in meters
-    M = ptab[halo_m_prop] / h  # halo mass in Msun
-    c = ptab['halo_nfw_conc']  # nfw concentration, dimensionless
-    r0 = ptab['r_centric'] / h  # distance to halo centre in kpc
-    Rs = ptab['halo_klypin_rs'] / h  # halo scale radius in kpc
-    vr2, vt2 = np.square(ptab['v_rad']), np.square(ptab['v_tan'])
+    M = pt[halo_m_prop] / h  # halo mass in Msun
+    c = pt['halo_nfw_conc']  # nfw concentration, dimensionless
+    r0 = pt['r_centric'] / h  # distance to halo centre in kpc
+    Rs = pt['halo_klypin_rs'] / h  # halo scale radius in kpc
+    vr2, vt2 = np.square(pt['v_rad']), np.square(pt['v_tan'])
     alpha = G_N*M*M_sun/1e6/kpc/(np.log(1+c) - c/(1+c))  # kpc (km/s)^2
     # initial X = 1, set first iteration value by hand
     X2 = np.sqrt(vt2/(vr2 + vt2))  # has NaN when v_pec = 0
@@ -206,7 +205,7 @@ def process_particle_props(ptab, h, halo_m_prop='halo_mvir',
         else:
             pass  # print(str_template)
 
-    ptab['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
+    pt['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
 
 
 def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
@@ -487,8 +486,8 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
 def make_galaxies(model, add_rsd=True, N_threads=10):
 
     h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
-    htab = model.mock.halo_table
-    N_halos = len(htab)  # total number of host halos available
+    ht = model.mock.halo_table
+    N_halos = len(ht)  # total number of host halos available
     # remove existing galaxy table, because modifying it is too painfully slow
     if hasattr(model.mock, 'galaxy_table'):
         del model.mock.galaxy_table
@@ -498,9 +497,9 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
 
     '''
     # if we add assembly bias, re-rank halos using pseudomass
-    halo_m = htab[model.halo_m_prop].data
+    halo_m = ht[model.halo_m_prop].data
     c_median = model.c_median_poly(np.log10(halo_m))
-    delta_c = htab['halo_nfw_conc'] - c_median
+    delta_c = ht['halo_nfw_conc'] - c_median
     A_cen = model.param_dict['A_cen']
     if A_cen != 0:
         print('Adding assembly bias for centrals...')
@@ -510,22 +509,22 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         ind_pm = halo_pseudomass_cen.argsort().argsort()
         halo_m = halo_m[ind_m][ind_pm]
     # calculate N_cen_mean using given model for all halos
-    htab['N_cen_model'] = N_cen_mean(halo_m / h, model.param_dict)
+    ht['N_cen_model'] = N_cen_mean(halo_m / h, model.param_dict)
     # create N_halos random numbers in half-open interval [0. 1) for centrals
-    htab['N_cen_rand'] = np.random.random(N_halos)
+    ht['N_cen_rand'] = np.random.random(N_halos)
     # if random number is less than model probably, halo hosts a central
-    mask_cen = htab['N_cen_rand'] < htab['N_cen_model']
+    mask_cen = ht['N_cen_rand'] < ht['N_cen_model']
     # add halo velocity bias for observer along LOS
     # if alpha_c = 0, no bias is added.
     # this operation should be fast enough, no skip needed
-    vz = do_vpec(htab['halo_vz'][mask_cen], htab['halo_vrms'][mask_cen],
+    vz = do_vpec(ht['halo_vz'][mask_cen], ht['halo_vrms'][mask_cen],
                  model.param_dict['alpha_c'])
     # add observational rsd for halos
     if add_rsd:
-        z = do_rsd(htab['halo_z'][mask_cen]/h, vz, model.mock.redshift,
+        z = do_rsd(ht['halo_z'][mask_cen]/h, vz, model.mock.redshift,
                    model.mock.cosmology, model.mock.BoxSize/h) * h  # in Mpc/h
     else:
-        z = htab['halo_z'][mask_cen]
+        z = ht['halo_z'][mask_cen]
     # central calculation done, create centrals table
     # create galaxy_table columns to be inherited from halo_table
     # excludes halo_z and halo_vz due to velocity bias and rsd
@@ -534,27 +533,27 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    'halo_vx', 'halo_vy', 'halo_vz',
                    'halo_klypin_rs', 'halo_nfw_conc', model.halo_m_prop,
                    'N_cen_model', 'N_cen_rand']
-    gtab_inh = table.Table([htab[col][mask_cen] for col in col_cen_inh],
-                           names=col_cen_inh)
+    gt_inh = table.Table([ht[col][mask_cen] for col in col_cen_inh],
+                         names=col_cen_inh)
     # create new columns containing galaxy properties, with bias & rsd
     # r_centric is the host centric distance between particle and halo centre
     col_cen_new = ['x', 'y', 'z', 'vx', 'vy', 'vz']
-    gtab_new = table.Table(
-        [htab['halo_x'][mask_cen],  htab['halo_y'][mask_cen],  np.float32(z),
-         htab['halo_vx'][mask_cen], htab['halo_vy'][mask_cen], np.float32(vz)],
+    gt_new = table.Table(
+        [ht['halo_x'][mask_cen],  ht['halo_y'][mask_cen],  np.float32(z),
+         ht['halo_vx'][mask_cen], ht['halo_vy'][mask_cen], np.float32(vz)],
         names=col_cen_new)
-    gtab_new['r_centric'] = np.float32(0)
+    gt_new['r_centric'] = np.float32(0)
     # combine inherited fields and new field(s)
-    gtab_cen = table.hstack([gtab_inh, gtab_new], join_type='exact')
-    gtab_cen['gal_type'] = 'centrals'
-    print('{} centrals generated.'.format(len(gtab_cen)))
+    gt_cen = table.hstack([gt_inh, gt_new], join_type='exact')
+    gt_cen['gal_type'] = 'centrals'
+    print('{} centrals generated.'.format(len(gt_cen)))
 
     '''
     satellites
 
     '''
     # before decorations, N_sat only depend on halo mass
-    halo_m = htab[model.halo_m_prop].data
+    halo_m = ht[model.halo_m_prop].data
     A_sat = model.param_dict['A_sat']
     if A_sat != 0:
         halo_pseudomass_sat = np.int64(
@@ -563,15 +562,15 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
         ind_pm = halo_pseudomass_sat.argsort().argsort()
         halo_m = halo_m[ind_m][ind_pm]
     # if subsamp_len = 0 for a row, we skip it and keep the undivided prob
-    mask = htab['halo_subsamp_len'] != 0
-    htab['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict)
-    htab['N_sat_model'][mask] /= htab['halo_subsamp_len'][mask]
+    mask = ht['halo_subsamp_len'] != 0
+    ht['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict)
+    ht['N_sat_model'][mask] /= ht['halo_subsamp_len'][mask]
     # # fix inf due to dividing by zero
-    # htab['N_sat_model'][htab['halo_subsamp_len'] == 0] = 0
+    # ht['N_sat_model'][ht['halo_subsamp_len'] == 0] = 0
     print('Creating inherited halo properties for centrals, r = {}...'
           .format(model.r))
-    ptab = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
-    N_particles = len(ptab)
+    pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
+    N_particles = len(pt)
     # inherite columns from halo talbe and add to particle table
     # particles belonging to the same halo share the same values
     col_cen_inh = ['halo_upid', 'halo_id', 'halo_hostid',
@@ -582,77 +581,76 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                    'N_cen_model', 'N_cen_rand', 'N_sat_model']
     for col in list(set(col_cen_inh)):
         # numpy bug, cannot cast uint64 to int64 for repeat
-        ptab[col] = np.repeat(htab[col],
-                              htab['halo_subsamp_len'].astype(np.int64))
+        pt[col] = np.repeat(ht[col], ht['halo_subsamp_len'].astype(np.int64))
     # calculate additional particle quantities for decorations
     print('Processing particle table properties for r = {}...'.format(model.r))
-    process_particle_props(ptab, h, halo_m_prop=model.halo_m_prop)
+    process_particle_props(pt, h, halo_m_prop=model.halo_m_prop)
     # particle table complete. onto satellite generation
     # calculate satellite probablity and generate random numbers
-    ptab['N_sat_rand'] = np.random.random(N_particles)
+    pt['N_sat_rand'] = np.random.random(N_particles)
     # add particle ranking using s, s_v, s_p for each halo
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
-        ptab[key] = np.int32(-1)
+        pt[key] = np.int32(-1)
 
     # print('Creating particle indices...')
-    # pidx = vrange(htab['halo_subsamp_start'].data,
-    #               htab['halo_subsamp_len'].data)
+    # pidx = vrange(ht['halo_subsamp_start'].data,
+    #               ht['halo_subsamp_len'].data)
     # splited arrays by halos, becomes iterable for MP
     # if model.param_dict['s'] != 0:
-    #     r_centric = ptab['r_centric'][pidx].data
+    #     r_centric = pt['r_centric'][pidx].data
     #     print('Splitting r_centric data array by halos...')
     #     r_centric_split = np.split(r_centric,
-    #                                htab['halo_subsamp_start'].data[1:])
+    #                                ht['halo_subsamp_start'].data[1:])
     #     print('Calculating halo centric distance rankings with MP...')
-    #     ptab['rank_s'] = rank_particles_by_halo(r_centric_split)
+    #     pt['rank_s'] = rank_particles_by_halo(r_centric_split)
     # if model.param_dict['s_v'] != 0:
-    #     v_pec = ptab['v_pec'][pidx]
+    #     v_pec = pt['v_pec'][pidx]
     #     print('Splitting v_pec data array by halos...')
-    #     v_pec_split = np.split(v_pec, htab['halo_subsamp_start'].data[1:])
+    #     v_pec_split = np.split(v_pec, ht['halo_subsamp_start'].data[1:])
     #     print('Calculating peculiar speed rankings with MP...')
-    #     ptab['rank_s_v'] = rank_particles_by_halo(v_pec_split)
+    #     pt['rank_s_v'] = rank_particles_by_halo(v_pec_split)
     # if model.param_dict['s_p'] != 0:
-    #     r_perihelion = ptab['r_perihelion'][pidx]
+    #     r_perihelion = pt['r_perihelion'][pidx]
     #     print('Splitting r_perihelion data array by halos...')
     #     r_perihelion_split = np.split(r_perihelion,
-    #                                   htab['halo_subsamp_start'].data[1:])
+    #                                   ht['halo_subsamp_start'].data[1:])
     #     print('Calculating perihelion distance rankings with MP...')
-    #     ptab['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
+    #     pt['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
     print('Ranking particles within each halo for r = {} ...'.format(model.r))
     for i in range(N_halos):
-        m = htab['halo_subsamp_start'][i]
-        n = htab['halo_subsamp_len'][i]
+        m = ht['halo_subsamp_start'][i]
+        n = ht['halo_subsamp_len'][i]
         if model.param_dict['s'] != 0:
             # furtherst particle has lowest rank, 0, innermost N-1
-            ptab['rank_s'][m:m+n] = ptab['r_centric'][m:m+n] \
+            pt['rank_s'][m:m+n] = pt['r_centric'][m:m+n] \
                 .argsort()[::-1].argsort()
         if model.param_dict['s_v'] != 0:
-            ptab['rank_s_v'][m:m+n] = ptab['v_pec'][m:m+n] \
+            pt['rank_s_v'][m:m+n] = pt['v_pec'][m:m+n] \
                 .argsort()[::-1].argsort()
         if model.param_dict['s_p'] != 0:
-            ptab['rank_s_p'][m:m+n] = ptab['r_perihelion'][m:m+n] \
+            pt['rank_s_p'][m:m+n] = pt['r_perihelion'][m:m+n] \
                 .argsort()[::-1].argsort()
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     # only re-rank halos where subsamp_len >= 2
-    mask = ptab['halo_subsamp_len'] >= 2
-    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s'] * (
-        1 - 2*ptab['rank_s'][mask] / (ptab['halo_subsamp_len'][mask]-1))
-    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s_v'] * (
-        1 - 2*ptab['rank_s_v'][mask] / (ptab['halo_subsamp_len'][mask]-1))
-    ptab['N_sat_model'][mask] *= 1 + model.param_dict['s_p'] * (
-        1 - 2*ptab['rank_s_p'][mask] / (ptab['halo_subsamp_len'][mask]-1))
+    mask = pt['halo_subsamp_len'] >= 2
+    pt['N_sat_model'][mask] *= 1 + model.param_dict['s'] * (
+        1 - 2*pt['rank_s'][mask] / (pt['halo_subsamp_len'][mask]-1))
+    pt['N_sat_model'][mask] *= 1 + model.param_dict['s_v'] * (
+        1 - 2*pt['rank_s_v'][mask] / (pt['halo_subsamp_len'][mask]-1))
+    pt['N_sat_model'][mask] *= 1 + model.param_dict['s_p'] * (
+        1 - 2*pt['rank_s_p'][mask] / (pt['halo_subsamp_len'][mask]-1))
     # select particles which host satellites
-    mask_sat = ptab['N_sat_rand'] < ptab['N_sat_model']
+    mask_sat = pt['N_sat_rand'] < pt['N_sat_model']
     # add RSD to mock sample
     if add_rsd:
-        z = do_rsd(ptab['z'][mask_sat]/h, ptab['vz'][mask_sat],
+        z = do_rsd(pt['z'][mask_sat]/h, pt['vz'][mask_sat],
                    model.mock.redshift, model.mock.cosmology,
                    model.mock.BoxSize/h) * h  # in Mpc/h
     else:
-        z = ptab['z'][mask_sat]
-    print('Creating inherited halo properties for centrals, r = {}...'
+        z = pt['z'][mask_sat]
+    print('Creating inherited halo properties for satellites, r = {}...'
           .format(model.r))
     # satellite calculation done, create satellites table
     # create galaxy_table columns to be inherited from particle table
@@ -665,21 +663,21 @@ def make_galaxies(model, add_rsd=True, N_threads=10):
                                           'N_sat_model', 'N_sat_rand',
                                           'rank_s', 'rank_s_v', 'rank_s_p']))
     for col in col_sat_inh:  # debug
-        assert col in ptab.keys()
-        assert len(ptab[col][mask_sat]) == len(ptab[mask_sat])
-    gtab_inh = table.Table([ptab[col][mask_sat] for col in col_sat_inh],
-                           names=col_sat_inh)
+        assert col in pt.keys()
+        assert len(pt[col][mask_sat]) == len(pt[mask_sat])
+    gt_inh = table.Table([pt[col][mask_sat] for col in col_sat_inh],
+                         names=col_sat_inh)
     col_sat_new = ['z']
     # save z as float32 as all positions in catalogues are float32
     # this also ensures Corrfunc compatibility
-    gtab_new = table.Table([np.float32(z)], names=col_sat_new)
+    gt_new = table.Table([np.float32(z)], names=col_sat_new)
     # combine inherited fields and new field(s)
-    gtab_sat = table.hstack([gtab_inh, gtab_new], join_type='exact')
-    gtab_sat['gal_type'] = 'satellites'
-    print('{} satellites generated.'.format(len(gtab_sat)))
+    gt_sat = table.hstack([gt_inh, gt_new], join_type='exact')
+    gt_sat['gal_type'] = 'satellites'
+    print('{} satellites generated.'.format(len(gt_sat)))
     # combine centrals table and satellites table
-    model.mock.galaxy_table = table.vstack([gtab_cen, gtab_sat],
+    model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],
                                            join_type='outer')
-    model.mock.halo_ptcl_table = ptab
+    model.mock.halo_ptcl_table = pt
 
     return model

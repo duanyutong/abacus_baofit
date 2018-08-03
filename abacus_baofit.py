@@ -53,6 +53,7 @@ use_analytic_randoms = True
 use_jackknife = True
 add_rsd = False
 debug_mode = False
+reconstruction = True
 
 # %% bin settings
 step_s_bins = 5  # mpc/h, bins for fitting
@@ -221,7 +222,7 @@ def make_halocat(phase):
 
     print('---\n'
           + 'Importing phase {} halo catelogue from: \n'.format(phase)
-          + '{}{}_{:02}-{}/z{}/'
+          + '{}{}_{:02}-{}_products/z{}/'
             .format(prod_dir, sim_name_prefix, cosmology, phase, redshift)
           + '\n---')
 
@@ -231,7 +232,7 @@ def make_halocat(phase):
         halo_type=halo_type,
         load_halo_ptcl_catalog=True,  # this loads 10% particle subsamples
         load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
-        load_pids='auto')
+        load_pids=False)
 
     halocat = halocats[0][0][0]
 
@@ -433,17 +434,17 @@ def do_auto_count(model, mode='smu'):
                    x, y, z, periodic=True, verbose=False, boxsize=L,
                    output_savg=True, c_api_timer=False)
         ND = len(model.mock.galaxy_table)
-        if use_analytic_randoms:
-            DR, _, RR = analytic_random(
-                    ND, ND, ND, ND, s_bins, mu_bins, Lbox.prod())
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-DR-{}.txt'
-                                    .format(model_name, mode)),
-                       DR, fmt=txtfmt)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-RR-{}.txt'
-                                    .format(model_name, mode)),
-                       RR, fmt=txtfmt)
+        # if use_analytic_randoms:
+        DR, _, RR = analytic_random(
+                ND, ND, ND, ND, s_bins, mu_bins, Lbox.prod())
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-DR-{}.txt'
+                                .format(model_name, mode)),
+                   DR, fmt=txtfmt)
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-RR-{}.txt'
+                                .format(model_name, mode)),
+                   RR, fmt=txtfmt)
     elif mode == 'wp':  # also returns wp in addition to counts
         # print('Auto-correlation wp pair counting for entire box with {}'
         #       ' threads...'.format(N_threads))
@@ -457,18 +458,23 @@ def do_auto_count(model, mode='smu'):
     # calculate RR analytically for auto-correlation, in coarse bins
     if not use_analytic_randoms or debug_mode:
         if mode == 'smu':
-            ND = len(model.mock.galaxy_table)
-            NR = ND
-            xr = np.random.uniform(0, L, NR).astype(np.float32)
-            yr = np.random.uniform(0, L, NR).astype(np.float32)
-            zr = np.random.uniform(0, L, NR).astype(np.float32)
+            if reconstruction:
+                model.NR = model.mock.random_array.shape[0]
+                xr = model.mock.random_array[:, 1]
+                yr = model.mock.random_array[:, 2]
+                zr = model.mock.random_array[:, 3]
+            else:
+                model.NR = model.ND
+                xr = np.random.uniform(0, L, model.NR).astype(np.float32)
+                yr = np.random.uniform(0, L, model.NR).astype(np.float32)
+                zr = np.random.uniform(0, L, model.NR).astype(np.float32)
             DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
                        x, y, z, X2=xr, Y2=yr, Z2=zr,
-                       periodic=True, verbose=False, output_savg=True,
+                       periodic=True, verbose=True, output_savg=True,
                        boxsize=L, c_api_timer=False)
             RR = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
                        xr, yr, zr,
-                       periodic=True, verbose=False, output_savg=True,
+                       periodic=True, verbose=True, output_savg=True,
                        boxsize=L, c_api_timer=False)
             np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
                                  .format(model_name, mode)),
@@ -476,80 +482,6 @@ def do_auto_count(model, mode='smu'):
             np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
                                  .format(model_name, mode)),
                     RR)
-
-
-def do_subcross_count(model, N_sub):
-
-    sim_name = model.mock.header['SimName']
-    model_name = model.model_name
-    L = model.mock.BoxSize
-    L_sub = L / N_sub  # length of subvolume box
-    Lbox = model.mock.Lbox
-    redshift = model.mock.redshift
-    gtab = model.mock.galaxy_table
-    x1, y1, z1 = gtab['x'], gtab['y'], gtab['z']
-    ND1 = len(gtab)  # number of galaxies in entire volume of periodic box
-    filedir = os.path.join(save_dir, sim_name,
-                           'z{}-r{}'.format(redshift, model.r))
-    model.ND2 = []
-    for i, j, k in product(range(N_sub), repeat=3):
-        linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        mask = ((L_sub * i < gtab['x']) & (gtab['x'] <= L_sub * (i+1)) &
-                (L_sub * j < gtab['y']) & (gtab['y'] <= L_sub * (j+1)) &
-                (L_sub * k < gtab['z']) & (gtab['z'] <= L_sub * (k+1)))
-        gt_sub = gtab[mask]  # select a subvolume of the galaxy table
-        ND2 = len(gt_sub)  # number of galaxies in the subvolume
-        model.ND2.append(ND2)
-        x2, y2, z2 = gt_sub['x'], gt_sub['y'], gt_sub['z']
-        DD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                   x1, y1, z1, X2=x2, Y2=y2, Z2=z2,
-                   periodic=True, output_savg=True, verbose=False,
-                   boxsize=L, c_api_timer=False)
-        np.save(os.path.join(filedir,
-                             '{}-cross_{}-paircount-DD.npy'
-                             .format(model_name, linind)),
-                DD)
-
-        # the time trade off is ~5 minutes for ND=NR
-        if use_analytic_randoms:
-            DR, RD, RR = analytic_random(
-                    ND1, ND1, ND2, ND2, s_bins, mu_bins, Lbox.prod())
-            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
-                np.savetxt(os.path.join(filedir,
-                                        '{}-cross_{}-paircount-{}.txt'
-                                        .format(model_name, linind, tag)),
-                           output, fmt=txtfmt)
-
-        if not use_analytic_randoms or debug_mode:
-            # calculate D2Rbox by brute force sampling, where
-            # Rbox sample is homogeneous in volume of box
-            # force float32 (a.k.a. single precision float in C)
-            # to be consistent with galaxy table precision
-            # otherwise corrfunc raises an error
-            NR1, NR2 = ND1, ND2
-            xr1 = np.random.uniform(0, L, NR1).astype(np.float32)
-            yr1 = np.random.uniform(0, L, NR1).astype(np.float32)
-            zr1 = np.random.uniform(0, L, NR1).astype(np.float32)
-            xr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
-            yr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
-            zr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
-            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            RD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr1, yr1, zr1, X2=x2, Y2=y2, Z2=z2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            RR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr1, yr1, zr1, X2=xr2, Y2=yr2, Z2=zr2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
-                np.save(os.path.join(filedir,
-                                     '{}-cross_{}-paircount-{}.npy'
-                                     .format(model_name, linind, tag)),
-                        output)
 
 
 def do_auto_correlation(model, mode='smu'):
@@ -573,7 +505,8 @@ def do_auto_correlation(model, mode='smu'):
         DDnpy = np.load(os.path.join(filedir,
                                      '{}-auto-paircount-DD-smu.npy'
                                      .format(model_name)))
-        ND = len(model.mock.galaxy_table)
+        ND = model.ND
+        NR = model.NR
         # re-count pairs in new bins
         DD, savg = rebin_smu_counts(DDnpy)
         np.savetxt(os.path.join(filedir, '{}-auto-paircount-DD-{}-rebinned.txt'
@@ -586,8 +519,7 @@ def do_auto_correlation(model, mode='smu'):
             RR = np.loadtxt(os.path.join(filedir,
                                          '{}-auto-paircount-RR-{}.txt'
                                          .format(model_name, mode)))
-        if not use_analytic_randoms or debug_mode:
-            # rebin RR.npy counts
+        if not use_analytic_randoms or debug_mode:  # rebin npy counts
             DRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
                                          .format(model_name, mode)))
             RRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
@@ -598,12 +530,11 @@ def do_auto_correlation(model, mode='smu'):
                                     '{}-auto-paircount-DR-{}-rebinned.txt'
                                     .format(model_name, mode)),
                        DR, fmt=txtfmt)
-            np.savetxt(os.path.join(
-                    filedir,
-                    '{}-auto-paircount-RR-{}-rebinned.txt'
-                    .format(model_name, mode)),
-                RR, fmt=txtfmt)
-        xi_s_mu = ls_estimator(ND, ND, ND, ND, DD, DR, DR, RR)
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-RR-{}-rebinned.txt'
+                                    .format(model_name, mode)),
+                       RR, fmt=txtfmt)
+        xi_s_mu = ls_estimator(ND, NR, ND, NR, DD, DR, DR, RR)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         # create r vector from weighted average of DD pair counts
@@ -628,6 +559,88 @@ def do_auto_correlation(model, mode='smu'):
         return wp_txt
 
 
+def do_subcross_count(model, N_sub):
+
+    sim_name = model.mock.header['SimName']
+    model_name = model.model_name
+    L = model.mock.BoxSize
+    L_sub = L / N_sub  # length of subvolume box
+    Lbox = model.mock.Lbox
+    redshift = model.mock.redshift
+    gt = model.mock.galaxy_table
+    x1, y1, z1 = gt['x'], gt['y'], gt['z']
+    ND1 = len(gt)  # number of galaxies in entire volume of periodic box
+    filedir = os.path.join(save_dir, sim_name,
+                           'z{}-r{}'.format(redshift, model.r))
+    model.ND2 = []
+    model.NR2 = []
+    for i, j, k in product(range(N_sub), repeat=3):
+        linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
+        mask = ((L_sub * i < gt['x']) & (gt['x'] <= L_sub * (i+1)) &
+                (L_sub * j < gt['y']) & (gt['y'] <= L_sub * (j+1)) &
+                (L_sub * k < gt['z']) & (gt['z'] <= L_sub * (k+1)))
+        ND2 = len(gt[mask])  # number of galaxies in the subvolume
+        model.ND2.append(ND2)
+        x2, y2, z2 = gt[mask]['x'], gt[mask]['y'], gt[mask]['z']
+        DD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                   x1, y1, z1, X2=x2, Y2=y2, Z2=z2,
+                   periodic=True, output_savg=True, verbose=False,
+                   boxsize=L, c_api_timer=False)
+        np.save(os.path.join(filedir,
+                             '{}-cross_{}-paircount-DD.npy'
+                             .format(model_name, linind)),
+                DD)
+
+        # if use_analytic_randoms:
+        DR, RD, RR = analytic_random(
+                ND1, ND1, ND2, ND2, s_bins, mu_bins, Lbox.prod())
+        model.NR2.append(ND2)
+        for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
+            np.savetxt(os.path.join(filedir,
+                                    '{}-cross_{}-paircount-{}.txt'
+                                    .format(model_name, linind, tag)),
+                       output, fmt=txtfmt)
+
+        if not use_analytic_randoms or debug_mode:
+            # calculate D2Rbox by brute force sampling, where
+            # Rbox sample is homogeneous in volume of box
+            # force float32 (a.k.a. single precision float in C)
+            # to be consistent with galaxy table precision
+            # otherwise corrfunc raises an error
+            if reconstruction:
+                rs = model.mock.random_array  # random shifted array
+                model.NR2[linind] = rs.shape[0]
+                xr1, yr1, zr1 = rs[:, 1], rs[:, 2], rs[:, 3]
+                mask = ((L_sub * i < xr1) & (xr1 <= L_sub * (i+1)) &
+                        (L_sub * j < yr1) & (yr1 <= L_sub * (j+1)) &
+                        (L_sub * k < zr1) & (zr1 <= L_sub * (k+1)))
+                xr2, yr2, zr2 = xr1[mask], yr1[mask], zr1[mask]
+            else:
+                xr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
+                yr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
+                zr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
+                xr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
+                yr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
+                zr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
+            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            RD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       xr1, yr1, zr1, X2=x2, Y2=y2, Z2=z2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            RR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                       xr1, yr1, zr1, X2=xr2, Y2=yr2, Z2=zr2,
+                       periodic=True, verbose=False, output_savg=True,
+                       boxsize=L, c_api_timer=False)
+            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
+                np.save(os.path.join(filedir,
+                                     '{}-cross_{}-paircount-{}.npy'
+                                     .format(model_name, linind, tag)),
+                        output)
+
+
 def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
     '''
     cross-correlation between 1/N_sub^3 of a box to the whole box
@@ -639,8 +652,6 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
     sim_name = model.mock.header['SimName']
     redshift = model.mock.redshift
     model_name = model.model_name
-    gt = model.mock.galaxy_table
-    ND1 = len(gt)
     s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)
     s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
     mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
@@ -648,12 +659,10 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
                            'z{}-r{}'.format(redshift, model.r))
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index
-        ND2 = model.ND2[linind]
-        # read in pair counts file which has fine bins
+        # re-bin DD counts
         DDnpy = np.load(os.path.join(filedir,
                                      '{}-cross_{}-paircount-DD.npy'
                                      .format(model_name, linind)))
-        # set up bins using specifications, re-bin the counts
         DD, _ = rebin_smu_counts(DDnpy)
         np.savetxt(os.path.join(filedir,
                                 '{}-cross_{}-paircount-DD-rebinned.txt'
@@ -689,7 +698,8 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
                                         .format(model_name, linind, tag)),
                            output, fmt=txtfmt)
         # calculate cross-correlation from counts using dp estimator
-        xi_s_mu = ls_estimator(ND1, ND1, ND2, ND2, DD, DR, RD, RR)
+        xi_s_mu = ls_estimator(model.ND, model.NR, model.ND2[linind],
+                               model.NR2[linind], DD, DR, RD, RR)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
@@ -801,7 +811,7 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 
 def do_realisation(r, model_name):
 
-    global halocat
+    global halocat, use_analytic_randoms
     try:
         phase = halocat.ZD_Seed
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -831,6 +841,8 @@ def do_realisation(r, model_name):
             np.random.seed(seed)
             model = populate_model(halocat, model,
                                    add_rsd=add_rsd, N_threads=N_threads)
+            gt = model.mock.galaxy_table
+            model.ND = len(gt)
             # save galaxy table
             if save_hod_realisation:
                 print('Saving galaxy table for r = {} ...'.format(r))
@@ -838,17 +850,15 @@ def do_realisation(r, model_name):
                     os.makedirs(os.path.dirname(paths[0]))
                 except OSError:
                     pass
-                model.mock.galaxy_table.write(
-                    paths[0], format='ascii.fast_csv', overwrite=True)
+                gt.write(paths[0], format='ascii.fast_csv', overwrite=True)
             # save galaxy table metadata to sim directory, one file for each
             # to be combined later to avoid threading conflicts
-            N_cen = np.sum(model.mock.galaxy_table['gal_type'] == 'centrals')
-            N_sat = np.sum(model.mock.galaxy_table['gal_type'] == 'satellites')
-            N_gal = len(model.mock.galaxy_table)
-            assert N_cen + N_sat == N_gal
+            N_cen = np.sum(gt['gal_type'] == 'centrals')
+            N_sat = np.sum(gt['gal_type'] == 'satellites')
+            assert N_cen + N_sat == model.ND
             gt_meta = table.Table(
                     [[model_name], [phase], [r], [seed],
-                     [N_cen], [N_sat], [N_gal]],
+                     [N_cen], [N_sat], [model.ND]],
                     names=('model name', 'phase', 'realisation', 'seed',
                            'N centrals', 'N satellites', 'N galaxies'),
                     dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
@@ -858,6 +868,25 @@ def do_realisation(r, model_name):
                 save_dir, 'galaxy_table_meta',
                 '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
                 format='ascii.fast_csv', overwrite=True)
+            # apply standard reconstruction here
+            if reconstruction:
+                use_analytic_randoms = False
+                masses = np.zeros(len(gt)).reshape(-1, 1)
+                pos = np.array([gt['x'], gt['y'], gt['z']]).T
+                arr = np.hstack([masses, pos]).astype(np.float32)
+                arr.tofile(os.path.join(
+                        save_dir, 'gal_mx3_float32_0-1100_mpch.dat'),
+                    sep='')
+                # call reconstruction code and save gal/ran shifted data
+                ds = np.fromfile(os.path.join(
+                        save_dir, 'gal_mx3_float32_0-1100_mpch-shifted.dat'),
+                    dtype=np.float32).reshape(-1, 4)
+                rs = np.fromfile(os.path.join(
+                        save_dir, 'ran_mx3_float32_0-1100_mpch-shifted.dat'),
+                    dtype=np.float32).reshape(-1, 4)
+                gt['x'], gt['y'], gt['z'] = ds[:, 1], ds[:, 2], ds[:, 3]
+                model.mock.random_array = rs
+                model.NR = rs.shape[0]
             # perform statistics on model.mock.galaxy_table
             do_auto_count(model, mode='smu')
             do_subcross_count(model, N_sub=N_sub)
