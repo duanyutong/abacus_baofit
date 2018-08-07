@@ -444,7 +444,8 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model, add_rsd=True, N_threads=10):
+def populate_model(halocat, model,
+                   gt_path=None, add_rsd=True, N_threads=10):
 
     # use halotools HOD
     if model.model_type == 'prebuilt':
@@ -472,10 +473,14 @@ def populate_model(halocat, model, add_rsd=True, N_threads=10):
             # halo_table already had N_cut correction, just copy tables
             model.mock.halo_table = halocat.halo_table
             model.mock.halo_ptcl_table = halocat.halo_ptcl_table
-        # generate galaxy catalogue and overwrite model.mock.galaxy_table
-        print('Populating {} halos, r = {}...'
-              .format(len(model.mock.halo_table), model.r))
-        model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
+        if gt_path==None:
+            # generate galaxy catalogue and overwrite model.mock.galaxy_table
+            print('Populating {} halos, r = {}...'
+                  .format(len(model.mock.halo_table), model.r))
+            model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
+        else:
+            print('Loading existing galaxy table: {}'.format(gt_path))
+            model.mock.galaxy_table = table.Table.read(gt_path)
 
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))

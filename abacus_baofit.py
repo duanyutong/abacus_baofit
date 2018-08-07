@@ -12,6 +12,7 @@ import os
 from glob import glob
 from itertools import product
 from functools import partial
+import subprocess
 from multiprocessing import Pool
 import traceback
 import numpy as np
@@ -30,7 +31,7 @@ from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'ls'  # 'z0.5'
+tagout = 'recon'  # 'z0.5'
 phases = range(2)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -43,8 +44,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
 model_names = ['gen_base1']
 N_reals = 1  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 3  # for a single MP pool thread
-N_sub = 3  # number of subvolumes per dWimension
+N_threads = 30  # for a single MP pool thread
+N_sub = 3  # number of subvolumes per dimension
 
 # %% flags
 reuse_galaxies = True
@@ -460,9 +461,9 @@ def do_auto_count(model, mode='smu'):
         if mode == 'smu':
             if reconstruction:
                 model.NR = model.mock.random_array.shape[0]
-                xr = model.mock.random_array[:, 1]
-                yr = model.mock.random_array[:, 2]
-                zr = model.mock.random_array[:, 3]
+                xr = model.mock.random_array[:, 0]
+                yr = model.mock.random_array[:, 1]
+                zr = model.mock.random_array[:, 2]
             else:
                 model.NR = model.ND
                 xr = np.random.uniform(0, L, model.NR).astype(np.float32)
@@ -610,7 +611,7 @@ def do_subcross_count(model, N_sub):
             if reconstruction:
                 rs = model.mock.random_array  # random shifted array
                 model.NR2[linind] = rs.shape[0]
-                xr1, yr1, zr1 = rs[:, 1], rs[:, 2], rs[:, 3]
+                xr1, yr1, zr1 = rs[:, 0], rs[:, 1], rs[:, 2]
                 mask = ((L_sub * i < xr1) & (xr1 <= L_sub * (i+1)) &
                         (L_sub * j < yr1) & (yr1 <= L_sub * (j+1)) &
                         (L_sub * k < zr1) & (zr1 <= L_sub * (k+1)))
@@ -646,8 +647,6 @@ def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
     cross-correlation between 1/N_sub^3 of a box to the whole box
     N_sub^3 * 16 results are used for emperically estimating covariance matrix
     '''
-#    print('Cross-correlation for covariance estimation r = {}...'
-#          .format(model.r))
     # setting halocat properties to be compatibble with halotools
     sim_name = model.mock.header['SimName']
     redshift = model.mock.redshift
@@ -828,8 +827,6 @@ def do_realisation(r, model_name):
             print('All output files for r = {:2d}, model {} exists.'
                   .format(r, model_name))
         else:
-            print('Generating r = {} for phase {}, model {}...'
-                  .format(r, phase, model_name))
             model = initialise_model(halocat.redshift, model_name,
                                      halo_m_prop=halo_m_prop)
             model.N_cut = N_cut
@@ -839,12 +836,18 @@ def do_realisation(r, model_name):
             # set random seed using phase and realisation index r, model indep
             seed = phase*100 + r
             np.random.seed(seed)
-            model = populate_model(halocat, model,
+            print('Generating r = {} for phase {}, model {}...'
+                  .format(r, phase, model_name))
+            if reuse_galaxies:
+                gt_path = paths[0]
+            else:
+                gt_path = None
+            model = populate_model(halocat, model, gt_path=gt_path,
                                    add_rsd=add_rsd, N_threads=N_threads)
             gt = model.mock.galaxy_table
             model.ND = len(gt)
             # save galaxy table
-            if save_hod_realisation:
+            if not reuse_galaxies and save_hod_realisation:
                 print('Saving galaxy table for r = {} ...'.format(r))
                 try:
                     os.makedirs(os.path.dirname(paths[0]))
@@ -874,17 +877,21 @@ def do_realisation(r, model_name):
                 masses = np.zeros(len(gt)).reshape(-1, 1)
                 pos = np.array([gt['x'], gt['y'], gt['z']]).T
                 arr = np.hstack([masses, pos]).astype(np.float32)
-                arr.tofile(os.path.join(
-                        save_dir, 'gal_mx3_float32_0-1100_mpch.dat'),
-                    sep='')
+                arr.tofile('/home/dyt/store/recon_temp/gal_cat-{}.dat'
+                           .format(seed),
+                           sep='')
                 # call reconstruction code and save gal/ran shifted data
-                ds = np.fromfile(os.path.join(
-                        save_dir, 'gal_mx3_float32_0-1100_mpch-shifted.dat'),
-                    dtype=np.float32).reshape(-1, 4)
-                rs = np.fromfile(os.path.join(
-                        save_dir, 'ran_mx3_float32_0-1100_mpch-shifted.dat'),
-                    dtype=np.float32).reshape(-1, 4)
-                gt['x'], gt['y'], gt['z'] = ds[:, 1], ds[:, 2], ds[:, 3]
+                subprocess.call(['python', './recon/read/read.py',
+                                 str(phase), str(seed)])
+                subprocess.call(['python', './recon/reconstruct/reconst.py',
+                                str(phase), str(seed)])
+                ds = np.fromfile('/home/dyt/store/recon_temp/file_D-{}_rec'
+                                 .format(seed),
+                    dtype=np.float64)[8:].reshape(-1, 4)
+                rs = np.fromfile('/home/dyt/store/recon_temp/file_R-{}_rec'
+                                 .format(seed),
+                    dtype=np.float64)[8:].reshape(-1, 4)
+                gt['x'], gt['y'], gt['z'] = ds[:, 0], ds[:, 1], ds[:, 2]
                 model.mock.random_array = rs
                 model.NR = rs.shape[0]
             # perform statistics on model.mock.galaxy_table
