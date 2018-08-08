@@ -44,11 +44,11 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
 model_names = ['gen_base1']
 N_reals = 1  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 19  # for a single MP pool thread
+N_threads = 30  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
 
 # %% flags
-reuse_galaxies = False
+reuse_galaxies = True
 save_hod_realisation = True
 add_rsd = True
 
@@ -346,7 +346,8 @@ def fit_c_median(phases=range(16)):
 
     '''
     # check if output file already exists
-    if os.path.isfile(os.path.join(save_dir, 'c_median_poly.txt')):
+    if os.path.isfile(os.path.join(
+            '/home/dyt/store/', sim_name_prefix, 'c_median_poly.txt')):
         return None
     # load 16 phases for the given cosmology and redshift
     print('Loading halo catalogues...')
@@ -354,7 +355,7 @@ def fit_c_median(phases=range(16)):
         sim_name=sim_name_prefix, products_dir=prod_dir,
         redshifts=[redshift], cosmologies=[cosmology], phases=phases,
         halo_type=halo_type,
-        load_halo_ptcl_catalog=False,  # this loads 10% particle subsamples
+        load_halo_ptcl_catalog=True,  # this loads 10% particle subsamples
         load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
         load_pids='auto')[0][0]
     htabs = [halocat.halo_table for halocat in halocats]
@@ -739,8 +740,8 @@ def do_realisation(r, model_name):
         model = initialise_model(halocat.redshift, model_name,
                                  halo_m_prop=halo_m_prop)
         model.N_cut = N_cut  # add useful model properties here
-        model.c_median_poly = np.poly1d(
-                np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
+        model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
+                '/home/dyt/store/', sim_name_prefix, 'c_median_poly.txt')))
         model.r = r
         # random seed using phase and realisation index r, model independent
         seed = phase*100 + r
@@ -782,7 +783,7 @@ def do_realisation(r, model_name):
             format='ascii.fast_csv', overwrite=True)
         # pre-reconstruction auto-correlation with FT
         print('pre-recon, FT')
-        m = np.zeros(len(gt)).reshape(-1, 1)
+        m = np.zeros(len(gt))
         arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
         arr.tofile('/home/dyt/store/recon_temp/gal_cat-{}.dat'.format(seed),
                    sep='')
@@ -793,12 +794,16 @@ def do_realisation(r, model_name):
         nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}'
                                     .format(seed),
                                     dtype=np.float64)[8:].reshape(-1, 4))
+        nr[nr < 0] += 1100  # read.cpp re-wraps data above 550 to negative pos
+        print('nr max, min', nr.max(), nr.min())
         model.mock.numerical_randoms = nr
         # pre-recon auto-corr with pair-counting, analytical & numerical random
         print('pre-recon, pair-counting')
         do_auto_correlation(model, mode='smu-pre_recon',
                             use_numerical_randoms=True)
         do_auto_correlation(model, mode='wp-pre_recon')
+        do_subcross_correlation(model, N_sub=N_sub, mode='pre_recon',
+                                use_numerical_randoms=False)
         # apply standard reconstruction and calculate covariance matrix
         print('standard recon')
         subprocess.call(['python', './recon/reconstruct/reconst.py',
@@ -809,6 +814,8 @@ def do_realisation(r, model_name):
         nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}_rec'
                                     .format(seed),
                                     dtype=np.float64)[8:].reshape(-1, 4))
+        ds[ds < 0] += 1100  # undo wrapping by read.cpp for data_shifted
+        nr[nr < 0] += 1100  # undo wrapping by read.cpp for numerical randoms
         gt['x'], gt['y'], gt['z'] = ds[:, 0], ds[:, 1], ds[:, 2]
         model.mock.numerical_randoms = nr
         do_auto_correlation(model, mode='smu-post_recon',
@@ -912,11 +919,11 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
 if __name__ == "__main__":
 
-    # halocats = fit_c_median(phases=phases)
+    halocats = fit_c_median(phases=phases)
     for phase in phases:
         try:
             halocat = halocats[phase]
-        except NameError:
+        except TypeError:
             halocat = make_halocat(phase)
             halocat = process_rockstar_halocat(halocat, N_cut)
         for model_name in model_names:
