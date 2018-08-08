@@ -761,10 +761,10 @@ class RVZelParticle {
           fprintf(stderr,"Define U_v for new redshift !!\n");
         }
       #else // GRAND-HOD
-        U_x = h;     // position * U_x [Mpc/h]
-        if(index_sc == 3){
-          U_x = 1.0;
-        }
+        // U_x = h;     // position * U_x [Mpc/h]
+        // if(index_sc == 3){
+        U_x = 1.0;
+        // }
         U_v = 1.0;   // velocity * U_v * U_x [Mpc/h]
       #endif
     #endif

@@ -6,16 +6,20 @@ and plotting figures.
 
 '''
 
-import numpy as np
+# import numpy as np
 import sys
-import math, subprocess, inspect, os, re
+import subprocess, os
 # import matplotlib as mpl
 # mpl.use('AGG')
 # import matplotlib.pyplot as plt
 
 
-phase = sys.argv[1]
-tag = sys.argv[2]
+reconst = sys.argv[1]
+phase = sys.argv[2]
+tag = sys.argv[3]
+model_name = sys.argv[4]
+save_dir = sys.argv[5]
+
 inp_make = ""
 inp_run = "y"
 
@@ -28,7 +32,6 @@ DIFF_SHIFT = ""          # To sum the square of difference between shift_t_X and
 
 XCORR_DENSITY = ""       # To get X-correlation for density fields
 
-RECONST = "y"             # To reconsturuct (standard by default)
 ITERATION = ""           # To do the iterative reconstruction
 
 CHANGE_SM = "y"           # To change smoothing scale
@@ -36,7 +39,10 @@ SECOND = ""               # To take account of 2nd order in reconstruction
 
 INITIAL = ""             # To compute the corr for the initial density correlation function
 
-
+if reconst == '0':
+    RECONST = ""
+elif reconst == '1':
+    RECONST = "y"             # To reconsturuct (standard by default)
 #******* Options *********
 #------ run -------
 ngridCube = 480
@@ -179,115 +185,122 @@ inp_c_var_l = 0
 #         if (inp_all_sim or inp_run_ori):         
 #             
 
-#******* Path *********
+# #******* Path *********
 
-typehalo_n = "_rockstar" if typehalo else "_FoF"
-typeobject_n = "" if typeobject == 0 else "_halo" + "_Mc" + str("{0:.4f}".format(M_cut)) if typeobject == 1 \
-                            else "_gal" if index_sc == 0 else "_gal_du" if index_sc == 3 else "_gal_sc" + str("{0:.3f}".format(sc)) 
-typeFKP_n = "_F" if typeFKP else "_noF"
-typeFKP_ini_n = "_F" if typeFKP_ini else "_noF"
-uni_n = "_uni" if quniform else ""
-periodic_n = "_p" if qperiodic else ""
-shift_n = "_S" if qshift and typeobject == 0 else ""
-rsd_n = "_rsd" if RSD else ""
+# typehalo_n = "_rockstar" if typehalo else "_FoF"
+# typeobject_n = "" if typeobject == 0 else "_halo" + "_Mc" + str("{0:.4f}".format(M_cut)) if typeobject == 1 \
+#                             else "_gal" if index_sc == 0 else "_gal_du" if index_sc == 3 else "_gal_sc" + str("{0:.3f}".format(sc)) 
+# typeFKP_n = "_F" if typeFKP else "_noF"
+# typeFKP_ini_n = "_F" if typeFKP_ini else "_noF"
+# uni_n = "_uni" if quniform else ""
+# periodic_n = "_p" if qperiodic else ""
+# shift_n = "_S" if qshift and typeobject == 0 else ""
+# rsd_n = "_rsd" if RSD else ""
 
-if (typesim == 0):    # AbacusCosmos
-    path_to_sim = "/AbacusCosmos" \
-        + "/emulator_" + str(boxsizesim) + "box_planck_products" \
-        + "/emulator_" + str(boxsizesim) + "box_planck_00-" + str(phase) + "_products" \
-        + "/emulator_" + str(boxsizesim) + "box_planck_00-" + str(phase) + typehalo_n + "_halos"
-    phase_n = "_00-"
-elif (typesim == 1):  # Others
-    path_to_sim = "/Others" \
-        + "/BOSS_1600box_products" \
-        + "/BOSS_1600box_FoF_halos"
-    phase_n = ""
-elif (typesim == 2):  # ST
-    path_to_sim = "/ST"
-    phase_n = ""
-else:
-    path_to_sim = "fake"
-    print("# this typesim is not defined !!! ")
+# if (typesim == 0):    # AbacusCosmos
+#     path_to_sim = "/AbacusCosmos" \
+#         + "/emulator_" + str(boxsizesim) + "box_planck_products" \
+#         + "/emulator_" + str(boxsizesim) + "box_planck_00-" + str(phase) + "_products" \
+#         + "/emulator_" + str(boxsizesim) + "box_planck_00-" + str(phase) + typehalo_n + "_halos"
+#     phase_n = "_00-"
+# elif (typesim == 1):  # Others
+#     path_to_sim = "/Others" \
+#         + "/BOSS_1600box_products" \
+#         + "/BOSS_1600box_FoF_halos"
+#     phase_n = ""
+# elif (typesim == 2):  # ST
+#     path_to_sim = "/ST"
+#     phase_n = ""
+# else:
+#     path_to_sim = "fake"
+#     print("# this typesim is not defined !!! ")
 
-path_me = "/mnt/store1/rhada"
-path_z = "/z" + "{:.3f}".format(z_ave)
-# input
-path_input = path_me + path_to_sim + path_z
-path_input_ini = path_me + path_to_sim + "/ini"
-# output
-typeobject_d = "/matter" if typeobject == 0 else "/halo_Mc" + str("{0:.4f}".format(M_cut)) if typeobject == 1 \
-                        else "/gal" if index_sc == 0 else "/gal_du" if index_sc == 3 else "/gal_sc" + str("{0:.3f}".format(sc)) 
-sample_f = "fin_" + str(ratio_RtoD) + "_" + str(num_parcentage) + typeFKP_n
-sample_i = "ini_" + str(ratio_RtoD_ini) + "_" + str(num_parcentage_ini) + typeFKP_ini_n
-sample_d = "/" + sample_i + "_" + sample_f + "_ng" + str(ngridCube) + uni_n + periodic_n
-sample_ini_d = "/" + sample_i + "_ng" + str(ngridCube) + uni_n + periodic_n
-run_d = "/sep" + str(sep) + "_dsep" + str(dsep) + "_kmax" + str(kmax) + "_dk" + str(dk)
-space_d = "/rsd" if RSD else "/real"
-path_output = "../graph" + path_to_sim + path_z + typeobject_d + sample_d + run_d + space_d + "/file"
-path_ini_output = "../graph" + path_to_sim + "/ini" + sample_ini_d + run_d + "/file"
-path_bias_cr = "../graph" + path_to_sim + path_z
-path_bias = "../graph" + path_to_sim + path_z + typeobject_d + sample_d + run_d 
+# path_me = "/mnt/store1/rhada"
+# path_z = "/z" + "{:.3f}".format(z_ave)
+# # input
+# path_input = path_me + path_to_sim + path_z
+# path_input_ini = path_me + path_to_sim + "/ini"
+# # output
+# typeobject_d = "/matter" if typeobject == 0 else "/halo_Mc" + str("{0:.4f}".format(M_cut)) if typeobject == 1 \
+#                         else "/gal" if index_sc == 0 else "/gal_du" if index_sc == 3 else "/gal_sc" + str("{0:.3f}".format(sc)) 
+# sample_f = "fin_" + str(ratio_RtoD) + "_" + str(num_parcentage) + typeFKP_n
+# sample_i = "ini_" + str(ratio_RtoD_ini) + "_" + str(num_parcentage_ini) + typeFKP_ini_n
+# sample_d = "/" + sample_i + "_" + sample_f + "_ng" + str(ngridCube) + uni_n + periodic_n
+# sample_ini_d = "/" + sample_i + "_ng" + str(ngridCube) + uni_n + periodic_n
+# run_d = "/sep" + str(sep) + "_dsep" + str(dsep) + "_kmax" + str(kmax) + "_dk" + str(dk)
+# space_d = "/rsd" if RSD else "/real"
+# path_output = "../graph" + path_to_sim + path_z + typeobject_d + sample_d + run_d + space_d + "/file"
+# path_ini_output = "../graph" + path_to_sim + "/ini" + sample_ini_d + run_d + "/file"
+# path_bias_cr = "../graph" + path_to_sim + path_z
+# path_bias = "../graph" + path_to_sim + path_z + typeobject_d + sample_d + run_d 
 
 
-#******* filename *********
+# #******* filename *********
 
-typeFKP_spe = "" if typeFKP else "_nF"
-typeFKP_ini_spe = "" if typeFKP_ini else "_nF"
+# typeFKP_spe = "" if typeFKP else "_nF"
+# typeFKP_ini_spe = "" if typeFKP_ini else "_nF"
 
-sample_in_d = "/" + sample_f + "_ng" + str(ngridCube) + uni_n + periodic_n + shift_n
-sample_ini_in_d  = sample_ini_d
+# sample_in_d = "/" + sample_f + "_ng" + str(ngridCube) + uni_n + periodic_n + shift_n
+# sample_ini_in_d  = sample_ini_d
 
 # input
 infile = '/home/dyt/store/recon_temp/file_D-' + tag  # infile  = path_input + typeobject_d + sample_in_d + space_d + "/file_D"
 infile2 = '/home/dyt/store/recon_temp/file_R-' + tag  # infile2 = path_input + typeobject_d + sample_in_d + space_d + "/file_R"
 
-infile_ini  = path_input_ini + sample_ini_in_d + "/file_D"
-infile_ini2 = path_input_ini + sample_ini_in_d + "/file_R"
+infile_ini = infile  # path_input_ini + sample_ini_in_d + "/file_D"
+infile_ini2 = infile2  # path_input_ini + sample_ini_in_d + "/file_R"
 
 shift_true_x = infile + "_S0"
 shift_true_y = infile + "_S1"
 shift_true_z = infile + "_S2"
 
-# -------------------------
+# # -------------------------
 
-bias_n = "" if bias_uncer == 0 else "_b20m" if bias_uncer == -1 else "_b20p"
-run_ini = "_ini"
-run_ori = "_ori"
-run_std = "_std_sm" + str(sig_sm_std) + bias_n
-run_ite = "_ite_num" + str(ite_times) + "_smi" + str(sig_sm_ite) + "_div" + str(divi_sm) + "_sml" + str(last_sm) \
-       + "_Ca" + str(C_ani) + "_fe" + str(f_eff) \
-       + "_wi" + str(ite_weight_ini) + "_sn" + str(ite_switch) + "_ws" + str(ite_weight_2) + bias_n
+# bias_n = "" if bias_uncer == 0 else "_b20m" if bias_uncer == -1 else "_b20p"
+# run_ini = "_ini"
+# run_ori = "_ori"
+# run_std = "_std_sm" + str(sig_sm_std) + bias_n
+# run_ite = "_ite_num" + str(ite_times) + "_smi" + str(sig_sm_ite) + "_div" + str(divi_sm) + "_sml" + str(last_sm) \
+#        + "_Ca" + str(C_ani) + "_fe" + str(f_eff) \
+#        + "_wi" + str(ite_weight_ini) + "_sn" + str(ite_switch) + "_ws" + str(ite_weight_2) + bias_n
+
+
+# if(INITIAL):
+#     path_output = path_ini_output
+#     run_id  = run_ini
+#     infile = infile_ini
+#     infile2 = infile_ini2
+#     # flags not needed
+#     RSD = ""
+#     XCORR_SHIFT = ""
+#     XCORR_DENSITY = ""
+#     RECONST = ""
 sig_sm = sig_sm_std
-
-if(INITIAL):
-    path_output = path_ini_output
-    run_id  = run_ini
-    infile = infile_ini
-    infile2 = infile_ini2
-    # flags not needed
-    RSD = ""
-    XCORR_SHIFT = ""
-    XCORR_DENSITY = ""
-    RECONST = ""
-elif not(RECONST):
-    run_id  = run_ori
+if not(RECONST):
+    # run_id  = run_ori
+    recon_tag = 'pre_recon'
 else:
     if not(ITERATION):
-        run_id = run_std
+        # run_id = run_std
+        recon_tag = '-post_recon_std'
     else:
-        run_id  = run_ite
+        # run_id  = run_ite
         sig_sm = sig_sm_ite
+        recon_tag = '-post_recon_ite'
+
 
 # output
 path_output = '/home/dyt/store/recon_temp'
-run_id = '-' + tag
-outfile = path_output + "/result" + run_id + ".log"
 
-outfile_corr =  path_output + "/corr_N" + run_id + ".txt"
-outfile_corr2 = path_output + "/corr_R" + run_id + ".txt"
+outfile = os.path.join(save_dir, '{}-auto-ft_result-{}.log'
+                       .format(model_name, recon_tag))
+outfile_corr = os.path.join(save_dir, '{}-auto-ft_corr_N-{}.txt'
+                            .format(model_name, recon_tag))
+outfile_corr2 = os.path.join(save_dir, '{}-auto-ft_corr_R-{}.txt'
+                             .format(model_name, recon_tag))
 
-outfile_xcorr_sh = path_output + "/xcorr_shift" + run_id + ".dat"
-outfile_xcorr_de = path_output + "/xcorr_dense" + run_id + ".dat"
+outfile_xcorr_sh = path_output + "/xcorr_shift" + tag + ".dat"
+outfile_xcorr_de = path_output + "/xcorr_dense" + tag + ".dat"
 
 # def file_exist(filename, inp):
 #     inp_l = inp
