@@ -44,17 +44,13 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
 model_names = ['gen_base1']
 N_reals = 1  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 30  # for a single MP pool thread
+N_threads = 19  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
 
 # %% flags
-reuse_galaxies = True
+reuse_galaxies = False
 save_hod_realisation = True
-use_analytic_randoms = True
-use_jackknife = True
-add_rsd = False
-debug_mode = False
-reconstruction = True
+add_rsd = True
 
 # %% bin settings
 step_s_bins = 5  # mpc/h, bins for fitting
@@ -74,6 +70,15 @@ save_dir = os.path.join('/home/dyt/store/', sim_name_prefix+'-'+tagout)
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
+
+coadd_filenames = ['wp-pre_recon',
+                   'xi-smu-pre_recon-ar', 'xi-smu-pre_recon-nr',
+                   'xi_0-smu-pre_recon-ar', 'xi_0-smu-pre_recon-nr',
+                   'xi_2-smu-pre_recon-ar', 'xi_2-smu-pre_recon-nr',
+                   'wp-post_recon',
+                   'xi-smu-post_recon-ar', 'xi-smu-post_recon-nr',
+                   'xi_0-smu-post_recon-ar', 'xi_0-smu-post_recon-nr',
+                   'xi_2-smu-post_recon-ar', 'xi_2-smu-post_recon-nr']
 
 # # %% MP Class
 # class NoDaemonProcess(Process):
@@ -191,30 +196,19 @@ def xi1d_list_to_cov(xi_list):
     return np.cov(np.array(xi_list).T, bias=0)
 
 
-def coadd_xi_list(arr_list):
+def coadd_correlation(corr_list):
 
     '''
-    input list is [xi_s_mu_list, xi_0_list, xi_2_list, wp_list]
+    input is a list of xi or wp samples
 
     '''
-
-    xi_s_mu, xi_0, xi_2, wp = [np.array(l) for l in arr_list]
-#    for var in [xi_s_mu, xi_0, xi_2, wp]: #debug
-#        print(var.shape)
-    xi_s_mu_ca = np.mean(xi_s_mu, axis=0)
-    xi_s_mu_err = np.std(xi_s_mu, axis=0)
-    xi_0_ca = np.mean(xi_0, axis=0)  # coadding xi_0
-    xi_0_err = np.std(xi_0, axis=0)
-    xi_0_err[:, 0] = xi_0_ca[:, 0]  # reset r vector, all zeros after std
-    xi_2_ca = np.mean(xi_2, axis=0)  # coadding xi_2
-    xi_2_err = np.std(xi_2, axis=0)
-    xi_2_err[:, 0] = xi_2_ca[:, 0]  # reset r vector, all zeros after std
-    wp_ca = np.mean(wp, axis=0)
-    wp_err = np.std(wp, axis=0)
-    wp_err[:, 0] = wp_ca[:, 0]
-
-    return (xi_s_mu_ca, xi_s_mu_err, xi_0_ca, xi_0_err, xi_2_ca, xi_2_err,
-            wp_ca, wp_err)
+    arr = np.array(corr_list)
+    coadd = np.mean(arr, axis=0)
+    err = np.std(arr, axis=0)
+    if arr.shape[2] == 2:
+        # each input array in list is of shape (:, 2), and 1st column is r
+        err[:, 0] = coadd[:, 0]
+    return coadd, err
 
 
 # %% functions for tasks
@@ -409,9 +403,14 @@ def fit_c_median(phases=range(16)):
     return halocats
 
 
-def do_auto_count(model, mode='smu'):
-    # do the pair counting in 1 Mpc bins
+def do_auto_correlation(model, mode='smu-pre_recon',
+                        use_numerical_randoms=True):
 
+    '''
+    mode is a string that contains 'smu' or 'wp', and can include
+    pre/post-reconstruction tag which gets saved as part of filename
+    '''
+    # do pair counting in 1 Mpc bins
     sim_name = model.mock.header['SimName']
     L = model.mock.BoxSize
     Lbox = model.mock.Lbox
@@ -428,140 +427,99 @@ def do_auto_count(model, mode='smu'):
     # and the npy file saved are exactly the same and can be recovered
     # otherwise, with c_api_timer enabled, file is in "object" format,
     # not proper datatypes, and will cause indexing issues
-    if mode == 'smu':
-        # print('Auto-correlation smu pair counting for entire box with {}'
-        #       ' threads...'.format(N_threads))
-        DD = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                   x, y, z, periodic=True, verbose=False, boxsize=L,
-                   output_savg=True, c_api_timer=False)
-        ND = len(model.mock.galaxy_table)
-        # if use_analytic_randoms:
-        DR, _, RR = analytic_random(
-                ND, ND, ND, ND, s_bins, mu_bins, Lbox.prod())
-        np.savetxt(os.path.join(filedir,
-                                '{}-auto-paircount-DR-{}.txt'
-                                .format(model_name, mode)),
-                   DR, fmt=txtfmt)
-        np.savetxt(os.path.join(filedir,
-                                '{}-auto-paircount-RR-{}.txt'
-                                .format(model_name, mode)),
-                   RR, fmt=txtfmt)
-    elif mode == 'wp':  # also returns wp in addition to counts
-        # print('Auto-correlation wp pair counting for entire box with {}'
-        #       ' threads...'.format(N_threads))
-        DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
-                output_rpavg=True, verbose=False, c_api_timer=False)
-    # save counting results as original structured array in npy format
-    np.save(os.path.join(filedir,
-                         '{}-auto-paircount-DD-{}.npy'
-                         .format(model_name, mode)),
-            DD)
-    # calculate RR analytically for auto-correlation, in coarse bins
-    if not use_analytic_randoms or debug_mode:
-        if mode == 'smu':
-            if reconstruction:
-                model.NR = model.mock.random_array.shape[0]
-                xr = model.mock.random_array[:, 0]
-                yr = model.mock.random_array[:, 1]
-                zr = model.mock.random_array[:, 2]
-            else:
-                model.NR = model.ND
-                xr = np.random.uniform(0, L, model.NR).astype(np.float32)
-                yr = np.random.uniform(0, L, model.NR).astype(np.float32)
-                zr = np.random.uniform(0, L, model.NR).astype(np.float32)
-            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       x, y, z, X2=xr, Y2=yr, Z2=zr,
-                       periodic=True, verbose=True, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            RR = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr, yr, zr,
-                       periodic=True, verbose=True, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
-                                 .format(model_name, mode)),
-                    DR)
-            np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
-                                 .format(model_name, mode)),
-                    RR)
-
-
-def do_auto_correlation(model, mode='smu'):
-
-    '''
-    read in counts, and generate xi_s_mu using bins specified
-    using the PH (natural) estimator for periodic sim boxes instead of LS
-    '''
-    # print('Calculating auto-correlation {}...'.format(mode))
-    # setting halocat properties to be compatibble with halotools
-    sim_name = model.mock.header['SimName']
-    redshift = model.mock.redshift
-    model_name = model.model_name
-    # s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)
-    mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
-    filedir = os.path.join(save_dir, sim_name,
-                           'z{}-r{}'.format(redshift, model.r))
-
-    if mode == 'smu':
-        # read in pair counts file which has fine bins
-        DDnpy = np.load(os.path.join(filedir,
-                                     '{}-auto-paircount-DD-smu.npy'
-                                     .format(model_name)))
-        ND = model.ND
-        NR = model.NR
-        # re-count pairs in new bins
-        DD, savg = rebin_smu_counts(DDnpy)
+    if 'smu' in mode:
+        DDnpy = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                      x, y, z, periodic=True, verbose=False, boxsize=L,
+                      output_savg=True, c_api_timer=False)
+        DD, savg = rebin_smu_counts(DDnpy)  # re-count pairs in new bins
+        # create r vector from weighted average of DD pair counts
+        savg_vec = np.sum(savg * DD, axis=1) / np.sum(DD, axis=1)
+        # save counting results as original structured array in npy format
+        np.save(os.path.join(filedir,
+                             '{}-auto-paircount-DD-{}.npy'
+                             .format(model_name, mode)),
+                DDnpy)
         np.savetxt(os.path.join(filedir, '{}-auto-paircount-DD-{}-rebinned.txt'
                                 .format(model_name, mode)),
                    DD, fmt=txtfmt)
-        if use_analytic_randoms:
-            DR = np.loadtxt(os.path.join(filedir,
-                                         '{}-auto-paircount-DR-{}.txt'
-                                         .format(model_name, mode)))
-            RR = np.loadtxt(os.path.join(filedir,
-                                         '{}-auto-paircount-RR-{}.txt'
-                                         .format(model_name, mode)))
-        if not use_analytic_randoms or debug_mode:  # rebin npy counts
-            DRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-DR-{}.npy'
-                                         .format(model_name, mode)))
-            RRnpy = np.load(os.path.join(filedir, '{}-auto-paircount-RR-{}.npy'
-                                         .format(model_name, mode)))
-            DR, _ = rebin_smu_counts(DRnpy)
-            RR, _ = rebin_smu_counts(RRnpy)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-DR-{}-rebinned.txt'
-                                    .format(model_name, mode)),
-                       DR, fmt=txtfmt)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-RR-{}-rebinned.txt'
-                                    .format(model_name, mode)),
-                       RR, fmt=txtfmt)
-        xi_s_mu = ls_estimator(ND, NR, ND, NR, DD, DR, DR, RR)
+        model.ND = ND = len(model.mock.galaxy_table)
+        NR = 200 * ND
+        DR_ar, _, RR_ar = analytic_random(
+                ND, NR, ND, NR, s_bins, mu_bins, Lbox.prod())
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-DR-{}-ar.txt'
+                                .format(model_name, mode)),
+                   DR_ar, fmt=txtfmt)
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-RR-{}-ar.txt'
+                                .format(model_name, mode)),
+                   RR_ar, fmt=txtfmt)
+        xi_s_mu = ls_estimator(ND, NR, ND, NR, DD, DR_ar, DR_ar, RR_ar)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
-        # create r vector from weighted average of DD pair counts
-        savg_vec = np.sum(savg * DD, axis=1) / np.sum(DD, axis=1)
         xi_0_txt = np.vstack([savg_vec, xi_0]).T
         xi_2_txt = np.vstack([savg_vec, xi_2]).T
         for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                               ['xi_s_mu', 'xi_0', 'xi_2']):
-            np.savetxt(os.path.join(filedir, '{}-auto-{}.txt'
-                                    .format(model_name, tag)),
+                               ['xi', 'xi_0', 'xi_2']):
+            np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-ar.txt'
+                                    .format(model_name, tag, mode)),
                        output, fmt=txtfmt)
-        return xi_s_mu, xi_0_txt, xi_2_txt
-
-    elif mode == 'wp':  # read npy counts and create txt file
-        DD = np.load(os.path.join(filedir,
-                                  '{}-auto-paircount-DD-wp.npy'
-                                  .format(model_name)))
+        if use_numerical_randoms:
+            if hasattr(model.mock, 'numerical_randoms'):
+                model.NR = NR = model.mock.numerical_randoms.shape[0]
+                xr = model.mock.numerical_randoms[:, 0]
+                yr = model.mock.numerical_randoms[:, 1]
+                zr = model.mock.numerical_randoms[:, 2]
+            else:
+                print('No grid numerical randoms found. Assuming NR=ND.')
+                model.NR = NR = model.ND
+                xr = np.random.uniform(0, L, NR).astype(np.float32)
+                yr = np.random.uniform(0, L, NR).astype(np.float32)
+                zr = np.random.uniform(0, L, NR).astype(np.float32)
+            DRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                          x, y, z, X2=xr, Y2=yr, Z2=zr,
+                          periodic=True, verbose=True, output_savg=True,
+                          boxsize=L, c_api_timer=False)
+            RRnpy = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                          xr, yr, zr,
+                          periodic=True, verbose=True, output_savg=True,
+                          boxsize=L, c_api_timer=False)
+            DR_nr, _ = rebin_smu_counts(DRnpy)
+            RR_nr, _ = rebin_smu_counts(RRnpy)
+            np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}-nr.npy'
+                                 .format(model_name, mode)),
+                    DRnpy)
+            np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}-nr.npy'
+                                 .format(model_name, mode)),
+                    RRnpy)
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-DR-{}-nr_rebinned.txt'
+                                    .format(model_name, mode)),
+                       DR_nr, fmt=txtfmt)
+            np.savetxt(os.path.join(filedir,
+                                    '{}-auto-paircount-RR-{}-nr_rebinned.txt'
+                                    .format(model_name, mode)),
+                       RR_nr, fmt=txtfmt)
+            for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
+                                   ['xi', 'xi_0', 'xi_2']):
+                np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-nr.txt'
+                                        .format(model_name, tag, mode)),
+                           output, fmt=txtfmt)
+    elif 'wp' in mode:  # also returns wp in addition to counts
+        DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
+                output_rpavg=True, verbose=False, c_api_timer=False)
         wp_txt = np.vstack([DD['rpavg'], DD['wp']]).T
-        np.savetxt(os.path.join(filedir, '{}-auto-wp.txt'
-                                .format(model_name)),
+        np.savetxt(os.path.join(filedir, '{}-auto-{}.txt'
+                                .format(model_name, mode)),
                    wp_txt, fmt=txtfmt)
-        return wp_txt
 
 
-def do_subcross_count(model, N_sub):
-
+def do_subcross_correlation(model, N_sub=3, mode='post_recon',
+                            use_numerical_randoms=False):
+    '''
+    cross-correlation between 1/N_sub^3 of a box and the whole box
+    can be pre/post-reconstruction data
+    '''
     sim_name = model.mock.header['SimName']
     model_name = model.model_name
     L = model.mock.BoxSize
@@ -573,341 +531,296 @@ def do_subcross_count(model, N_sub):
     ND1 = len(gt)  # number of galaxies in entire volume of periodic box
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
-    model.ND2 = []
-    model.NR2 = []
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
         mask = ((L_sub * i < gt['x']) & (gt['x'] <= L_sub * (i+1)) &
                 (L_sub * j < gt['y']) & (gt['y'] <= L_sub * (j+1)) &
                 (L_sub * k < gt['z']) & (gt['z'] <= L_sub * (k+1)))
         ND2 = len(gt[mask])  # number of galaxies in the subvolume
-        model.ND2.append(ND2)
         x2, y2, z2 = gt[mask]['x'], gt[mask]['y'], gt[mask]['z']
-        DD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                   x1, y1, z1, X2=x2, Y2=y2, Z2=z2,
-                   periodic=True, output_savg=True, verbose=False,
-                   boxsize=L, c_api_timer=False)
+        DDnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                      x1, y1, z1, X2=x2, Y2=y2, Z2=z2,
+                      periodic=True, output_savg=True, verbose=False,
+                      boxsize=L, c_api_timer=False)
+        # re-bin DD counts
+        DD, _ = rebin_smu_counts(DDnpy)
         np.save(os.path.join(filedir,
                              '{}-cross_{}-paircount-DD.npy'
                              .format(model_name, linind)),
-                DD)
-
-        # if use_analytic_randoms:
+                DDnpy)
+        # use_analytic_randoms:
+        NR1, NR2 = 200 * ND1, 200 * ND2
         DR, RD, RR = analytic_random(
-                ND1, ND1, ND2, ND2, s_bins, mu_bins, Lbox.prod())
-        model.NR2.append(ND2)
+                ND1, NR1, ND2, NR2, s_bins, mu_bins, Lbox.prod())
         for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
             np.savetxt(os.path.join(filedir,
-                                    '{}-cross_{}-paircount-{}.txt'
-                                    .format(model_name, linind, tag)),
+                                    '{}-cross_{}-paircount-{}-{}-ar.txt'
+                                    .format(model_name, linind, tag, mode)),
                        output, fmt=txtfmt)
-
-        if not use_analytic_randoms or debug_mode:
-            # calculate D2Rbox by brute force sampling, where
-            # Rbox sample is homogeneous in volume of box
-            # force float32 (a.k.a. single precision float in C)
-            # to be consistent with galaxy table precision
-            # otherwise corrfunc raises an error
-            if reconstruction:
-                rs = model.mock.random_array  # random shifted array
-                model.NR2[linind] = rs.shape[0]
-                xr1, yr1, zr1 = rs[:, 0], rs[:, 1], rs[:, 2]
-                mask = ((L_sub * i < xr1) & (xr1 <= L_sub * (i+1)) &
-                        (L_sub * j < yr1) & (yr1 <= L_sub * (j+1)) &
-                        (L_sub * k < zr1) & (zr1 <= L_sub * (k+1)))
-                xr2, yr2, zr2 = xr1[mask], yr1[mask], zr1[mask]
-            else:
-                xr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
-                yr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
-                zr1 = np.random.uniform(0, L, model.ND).astype(np.float32)
-                xr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
-                yr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
-                zr2 = np.random.uniform(0, L_sub, ND2).astype(np.float32)
-            DR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            RD = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr1, yr1, zr1, X2=x2, Y2=y2, Z2=z2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            RR = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                       xr1, yr1, zr1, X2=xr2, Y2=yr2, Z2=zr2,
-                       periodic=True, verbose=False, output_savg=True,
-                       boxsize=L, c_api_timer=False)
-            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
-                np.save(os.path.join(filedir,
-                                     '{}-cross_{}-paircount-{}.npy'
-                                     .format(model_name, linind, tag)),
-                        output)
-
-
-def do_subcross_correlation(model, N_sub=3):  # n defines number of subvolums
-    '''
-    cross-correlation between 1/N_sub^3 of a box to the whole box
-    N_sub^3 * 16 results are used for emperically estimating covariance matrix
-    '''
-    # setting halocat properties to be compatibble with halotools
-    sim_name = model.mock.header['SimName']
-    redshift = model.mock.redshift
-    model_name = model.model_name
-    s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)
-    s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
-    mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
-    filedir = os.path.join(save_dir, sim_name,
-                           'z{}-r{}'.format(redshift, model.r))
-    for i, j, k in product(range(N_sub), repeat=3):
-        linind = i*N_sub**2 + j*N_sub + k  # linearised index
-        # re-bin DD counts
-        DDnpy = np.load(os.path.join(filedir,
-                                     '{}-cross_{}-paircount-DD.npy'
-                                     .format(model_name, linind)))
-        DD, _ = rebin_smu_counts(DDnpy)
-        np.savetxt(os.path.join(filedir,
-                                '{}-cross_{}-paircount-DD-rebinned.txt'
-                                .format(model_name, linind)),
-                   DD, fmt=txtfmt)
-        # read DR, RD, and RR counts and re-bin
-        if use_analytic_randoms:
-            DR = np.loadtxt(
-                    os.path.join(filedir, '{}-cross_{}-paircount-DR.txt'
-                                 .format(model_name, linind)))
-            RD = np.loadtxt(
-                    os.path.join(filedir, '{}-cross_{}-paircount-RD.txt'
-                                 .format(model_name, linind)))
-            RR = np.loadtxt(
-                    os.path.join(filedir, '{}-cross_{}-paircount-RR.txt'
-                                 .format(model_name, linind)))
-        if not use_analytic_randoms or debug_mode:
-            DRnpy = np.load(os.path.join(filedir,
-                                         '{}-cross_{}-paircount-DR.npy'
-                                         .format(model_name, linind)))
-            RDnpy = np.load(os.path.join(filedir,
-                                         '{}-cross_{}-paircount-RD.npy'
-                                         .format(model_name, linind)))
-            RRnpy = np.load(os.path.join(filedir,
-                                         '{}-cross_{}-paircount-RR.npy'
-                                         .format(model_name, linind)))
-            DR, _ = rebin_smu_counts(DRnpy)
-            RD, _ = rebin_smu_counts(RDnpy)
-            RR, _ = rebin_smu_counts(RRnpy)
-            for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
-                np.savetxt(os.path.join(filedir,
-                                        '{}-cross_{}-paircount-{}-rebinned.txt'
-                                        .format(model_name, linind, tag)),
-                           output, fmt=txtfmt)
-        # calculate cross-correlation from counts using dp estimator
-        xi_s_mu = ls_estimator(model.ND, model.NR, model.ND2[linind],
-                               model.NR2[linind], DD, DR, RD, RR)
+        # calculate cross-correlation from counts using ls estimator
+        xi_s_mu = ls_estimator(ND1, NR1, ND2, NR2, DD, DR, RD, RR)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
         xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
         for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                               ['xi_s_mu', 'xi_0', 'xi_2']):
+                               ['xi', 'xi_0', 'xi_2']):
             np.savetxt(os.path.join(filedir,
-                                    '{}-cross_{}-{}.txt'
-                                    .format(model_name, linind, tag)),
+                                    '{}-cross_{}-{}-{}-ar.txt'
+                                    .format(model_name, linind, tag, mode)),
                        output, fmt=txtfmt)
+        if use_numerical_randoms:
+            # calculate D2Rbox by brute force sampling, where
+            # Rbox sample is homogeneous in volume of box
+            # force float32 (a.k.a. single precision float in C)
+            # to be consistent with galaxy table precision
+            # otherwise corrfunc raises an error
+            if hasattr(model.mock, 'numerical_randoms'):
+                nr = model.mock.random_array  # random shifted array
+                xr1, yr1, zr1 = nr[:, 0], nr[:, 1], nr[:, 2]
+                mask = ((L_sub * i < xr1) & (xr1 <= L_sub * (i+1)) &
+                        (L_sub * j < yr1) & (yr1 <= L_sub * (j+1)) &
+                        (L_sub * k < zr1) & (zr1 <= L_sub * (k+1)))
+                xr2, yr2, zr2 = xr1[mask], yr1[mask], zr1[mask]
+                NR1 = xr1.size
+                NR2 = xr2.size
+            else:
+                xr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+                yr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+                zr1 = np.random.uniform(0, L, NR1).astype(np.float32)
+                xr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+                yr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+                zr2 = np.random.uniform(0, L_sub, NR2).astype(np.float32)
+            DRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                          x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
+                          periodic=True, verbose=False, output_savg=True,
+                          boxsize=L, c_api_timer=False)
+            RDnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                          xr1, yr1, zr1, X2=x2, Y2=y2, Z2=z2,
+                          periodic=True, verbose=False, output_savg=True,
+                          boxsize=L, c_api_timer=False)
+            RRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                          xr1, yr1, zr1, X2=xr2, Y2=yr2, Z2=zr2,
+                          periodic=True, verbose=False, output_savg=True,
+                          boxsize=L, c_api_timer=False)
+            for npy, txt, tag in zip([DRnpy, RDnpy, RRnpy],
+                                     [DR, RD, RR],
+                                     ['DR', 'RD', 'RR']):
+                np.save(os.path.join(
+                        filedir, '{}-cross_{}-paircount-{}-{}-nr.npy'
+                        .format(model_name, linind, tag, mode)),
+                        npy)
+                np.savetxt(os.path.join(
+                        filedir, '{}-cross_{}-paircount-{}-{}-nr_rebinned.txt'
+                        .format(model_name, linind, tag, mode)),
+                    txt, fmt=txtfmt)
+            DR, _ = rebin_smu_counts(DRnpy)
+            RD, _ = rebin_smu_counts(RDnpy)
+            RR, _ = rebin_smu_counts(RRnpy)
+            xi_s_mu = ls_estimator(ND1, NR1, ND2, NR2, DD, DR, RD, RR)
+            xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
+            xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
+            xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
+            xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
+            for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
+                                   ['xi', 'xi_0', 'xi_2']):
+                np.savetxt(os.path.join(
+                        filedir,
+                        '{}-cross_{}-{}-{}-nr.txt'
+                        .format(model_name, linind, tag, mode)),
+                    output, fmt=txtfmt)
 
 
-def do_coadd_phases(model_name, coadd_phases=range(16)):
+def coadd_phases(model_name, coadd_phases=range(16)):
 
     print('Coadding xi from all phases for model {}...'.format(model_name))
-    xi_list_phases = []
-    xi_0_list_phases = []
-    xi_2_list_phases = []
-    wp_list_phases = []
-
-    for phase in coadd_phases:
-
-        sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-        fintags = ['xi_s_mu-ca', 'xi_0-ca', 'xi_2-ca', 'wp-ca']
-        path_xi, path_xi_0, path_xi_2, path_wp = [
-                os.path.join(save_dir, sim_name, 'z{}'.format(redshift),
-                             '{}-auto-{}.txt'.format(model_name, t))
-                for t in fintags]
-        xi_list_phases.append(np.loadtxt(path_xi))
-        xi_0_list_phases.append(np.loadtxt(path_xi_0))
-        xi_2_list_phases.append(np.loadtxt(path_xi_2))
-        wp_list_phases.append(np.loadtxt(path_wp))
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    outputs = coadd_xi_list([xi_list_phases, xi_0_list_phases,
-                             xi_2_list_phases, wp_list_phases])
-    tags = ['xi_s_mu-ca', 'xi_s_mu-err', 'xi_0-ca', 'xi_0-err',
-            'xi_2-ca',    'xi_2-err',    'wp-ca',   'wp-err']
-    for output, tag in zip(outputs, tags):
-        np.savetxt(os.path.join(filedir,
-                                '{}-auto-{}.txt'.format(model_name, tag)),
-                   output, fmt=txtfmt)
-    if use_jackknife:
-        for phase in coadd_phases:
-            xi_list = xi_list_phases[:phase] + xi_list_phases[phase+1:]
-            xi_0_list = xi_0_list_phases[:phase] + xi_0_list_phases[phase+1:]
-            xi_2_list = xi_2_list_phases[:phase] + xi_2_list_phases[phase+1:]
-            wp_list = wp_list_phases[:phase] + wp_list_phases[phase+1:]
-            outputs = coadd_xi_list([xi_list, xi_0_list, xi_2_list, wp_list])
-            for output, tag in zip(outputs, tags):
-                np.savetxt(os.path.join(filedir,
-                                        '{}-auto-{}-jackknife_{}.txt'
-                                        .format(model_name, tag, phase)),
-                           output, fmt=txtfmt)
+    for fn in coadd_filenames:
+        temp = os.path.join(
+            save_dir,
+            '{}_{:02}-[0-9]*'.format(sim_name_prefix, cosmology),
+            'z{}'.format(redshift), '*'+fn+'*')
+        paths = glob(temp)
+        print('temp is:', temp)
+        print('paths are:', paths)
+        assert len(paths) == len(coadd_phases)
+        corr_list = [np.loadtxt(path) for path in paths]
+        coadd, error = coadd_correlation(corr_list)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
+            coadd, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
+            error, fmt=txtfmt)
+        for phase in coadd_phases:  # jackknife delete-one
+            jk_list = corr_list[:phase] + corr_list[phase+1:]
+            coadd, error = coadd_correlation(jk_list)
+            np.savetxt(os.path.join(
+                    filedir, '{}-auto-{}-jackknife_{}-coadd.txt'
+                    .format(model_name, fn, phase)),
+                coadd, fmt=txtfmt)
+            np.savetxt(os.path.join(
+                    filedir, '{}-auto-{}-jackknife_{}-error.txt'
+                    .format(model_name, fn, phase)),
+                error, fmt=txtfmt)
 
 
 def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 
-    # calculate cov combining all phases, 16 * N_sub^3 * N_reals
-    for ell in [0, 2]:
-        paths = []
+    # # calculate cov combining all phases, 16 * N_sub^3 * N_reals
+    # for ell in [0, 2]:
+    #     paths = []
+    #     for phase in cov_phases:
+    #         sim_name = '{}_{:02}-{}' \
+    #                    .format(sim_name_prefix, cosmology, phase)
+    #         paths = paths + glob(os.path.join(
+    #                     save_dir, sim_name, 'z{}-r*'.format(redshift),
+    #                     '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
+    #     # read in all xi files for all phases
+    #     xi_list = [np.loadtxt(path)[:, 1] for path in paths]
+    #     # as cov gets smaller, chisq gets bigger, contour gets smaller
+    #     cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
+    #     # save cov
+    #     filepath = os.path.join(  # save to coadd folder for all phases
+    #             save_dir,
+    #             '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
+    #             'z{}'.format(redshift),
+    #             '{}-cross-xi_{}-cov.txt'.format(model_name, ell))
+    #     np.savetxt(filepath, cov, fmt=txtfmt)
+
+    # calculate monoquad cov for baofit, 4 types of covariance
+    for recon, rand in product(['pre_recon', 'post_recon'], ['ar', 'nr']):
+        xi_list = []
         for phase in cov_phases:
             sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-            paths = paths + glob(os.path.join(
-                        save_dir, sim_name, 'z{}-r*'.format(redshift),
-                        '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
-        # read in all xi files for all phases
-        xi_list = [np.loadtxt(path)[:, 1] for path in paths]
-        # as cov gets smaller, chisq gets bigger, contour gets smaller
-        cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
-        # save cov
+            paths0 = sorted(glob(os.path.join(
+                            save_dir, sim_name, 'z{}-r*'.format(redshift),
+                            '{}-cross_*xi_0*{}*{}.txt'
+                            .format(model_name, recon, rand))))
+            paths2 = sorted(glob(os.path.join(
+                            save_dir, sim_name, 'z{}-r*'.format(redshift),
+                            '{}-cross_*xi_2*{}*{}.txt'
+                            .format(model_name, recon, rand))))
+            assert len(paths0) == len(paths2)
+            if len(paths0) == 0:
+                break
+            for path0, path2 in zip(paths0, paths2):
+                # sorted list of paths within a phase guarantees
+                # xi0 and xi2 are from the same realisation
+                xi_0 = np.loadtxt(path0)[:, 1]
+                xi_2 = np.loadtxt(path2)[:, 1]
+                xi_list.append(np.hstack((xi_0, xi_2)))
+        cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
         filepath = os.path.join(  # save to coadd folder for all phases
                 save_dir,
                 '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                 'z{}'.format(redshift),
-                '{}-cross-xi_{}-cov.txt'.format(model_name, ell))
-        np.savetxt(filepath, cov, fmt=txtfmt)
-
-    # calculate monoquad cov for baofit
-    xi_list = []
-    for phase in cov_phases:
-        sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-        paths0 = sorted(glob(os.path.join(
-                        save_dir, sim_name, 'z{}-r*'.format(redshift),
-                        '{}-cross_*-xi_0.txt'.format(model_name))))
-        paths2 = sorted(glob(os.path.join(
-                        save_dir, sim_name, 'z{}-r*'.format(redshift),
-                        '{}-cross_*-xi_2.txt'.format(model_name))))
-        if len(paths0) != len(paths2):
-            print('Cross correlation monopole and quadrupole mismatch')
-            return False
-        for path0, path2 in zip(paths0, paths2):
-            xi_0 = np.loadtxt(path0)[:, 1]
-            xi_2 = np.loadtxt(path2)[:, 1]
-            xi_list.append(np.hstack((xi_0, xi_2)))
-    cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
-    # save cov
-    filepath = os.path.join(  # save to coadd folder for all phases
-            save_dir,
-            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
-            'z{}'.format(redshift),
-            '{}-cross-xi_monoquad-cov.txt'.format(model_name, ell))
-    np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
-    # print('Monoquad covariance matrix saved to: ', filepath)
+                '{}-cross-xi_monoquad-cov-{}-{}.txt'
+                .format(model_name, recon, rand))
+        np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
+        # print('Monoquad covariance matrix saved to: ', filepath)
 
 
 def do_realisation(r, model_name):
 
     global halocat, use_analytic_randoms
-    try:
+    try:  # this helps catch exception in a worker thread of multiprocessing
         phase = halocat.ZD_Seed
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-        # check if files exist in the realisation directory
-        filenames = ['galaxy_table.csv', 'auto-xi_s_mu.txt',
-                     'auto-xi_0.txt', 'auto-xi_2.txt', 'auto-wp.txt']
-        paths = [os.path.join(save_dir, sim_name,
-                              'z{}-r{}'.format(redshift, r),
-                              '{}-{}'.format(model_name, fn))
-                 for fn in filenames]
-        if np.all([os.path.isfile(path) for path in paths]) and reuse_galaxies:
-            # all output files exist, skip this realisation
-            xi_s_mu, xi_0, xi_2, wp = [np.loadtxt(path) for path in paths[1:]]
-            print('All output files for r = {:2d}, model {} exists.'
-                  .format(r, model_name))
+        recon_dir = os.path.join(save_dir, sim_name,
+                                 'z{}-r{}'.format(redshift, r))
+        gt_path = os.path.join(recon_dir, '{}-galaxy_table.csv'
+                               .format(model_name))
+        # all realisations in parallel, each model needs to be instantiated
+        model = initialise_model(halocat.redshift, model_name,
+                                 halo_m_prop=halo_m_prop)
+        model.N_cut = N_cut  # add useful model properties here
+        model.c_median_poly = np.poly1d(
+                np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
+        model.r = r
+        # random seed using phase and realisation index r, model independent
+        seed = phase*100 + r
+        np.random.seed(seed)
+        print('Working on r = {} for phase {}, model {}...'
+              .format(r, phase, model_name))
+        if reuse_galaxies:
+            gt_path_input = gt_path
         else:
-            model = initialise_model(halocat.redshift, model_name,
-                                     halo_m_prop=halo_m_prop)
-            model.N_cut = N_cut
-            model.c_median_poly = np.poly1d(
-                    np.loadtxt(os.path.join(save_dir, 'c_median_poly.txt')))
-            model.r = r  # add useful model properties here
-            # set random seed using phase and realisation index r, model indep
-            seed = phase*100 + r
-            np.random.seed(seed)
-            print('Generating r = {} for phase {}, model {}...'
-                  .format(r, phase, model_name))
-            if reuse_galaxies:
-                gt_path = paths[0]
-            else:
-                gt_path = None
-            model = populate_model(halocat, model, gt_path=gt_path,
-                                   add_rsd=add_rsd, N_threads=N_threads)
-            gt = model.mock.galaxy_table
-            model.ND = len(gt)
-            # save galaxy table
-            if not reuse_galaxies and save_hod_realisation:
-                print('Saving galaxy table for r = {} ...'.format(r))
-                try:
-                    os.makedirs(os.path.dirname(paths[0]))
-                except OSError:
-                    pass
-                gt.write(paths[0], format='ascii.fast_csv', overwrite=True)
-            # save galaxy table metadata to sim directory, one file for each
-            # to be combined later to avoid threading conflicts
-            N_cen = np.sum(gt['gal_type'] == 'centrals')
-            N_sat = np.sum(gt['gal_type'] == 'satellites')
-            assert N_cen + N_sat == model.ND
-            gt_meta = table.Table(
-                    [[model_name], [phase], [r], [seed],
-                     [N_cen], [N_sat], [model.ND]],
-                    names=('model name', 'phase', 'realisation', 'seed',
-                           'N centrals', 'N satellites', 'N galaxies'),
-                    dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-            if not os.path.exists(os.path.join(save_dir, 'galaxy_table_meta')):
-                os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
-            gt_meta.write(os.path.join(
-                save_dir, 'galaxy_table_meta',
-                '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
-                format='ascii.fast_csv', overwrite=True)
-            # apply standard reconstruction here
-            if reconstruction:
-                use_analytic_randoms = False
-                masses = np.zeros(len(gt)).reshape(-1, 1)
-                pos = np.array([gt['x'], gt['y'], gt['z']]).T
-                arr = np.hstack([masses, pos]).astype(np.float32)
-                arr.tofile('/home/dyt/store/recon_temp/gal_cat-{}.dat'
-                           .format(seed),
-                           sep='')
-                # call reconstruction code and save gal/ran shifted data
-                subprocess.call(['python', './recon/read/read.py',
-                                 str(phase), str(seed)])
-                subprocess.call(['python', './recon/reconstruct/reconst.py',
-                                str(phase), str(seed)])
-                ds = np.fromfile('/home/dyt/store/recon_temp/file_D-{}_rec'
-                                 .format(seed),
-                    dtype=np.float64)[8:].reshape(-1, 4)
-                rs = np.fromfile('/home/dyt/store/recon_temp/file_R-{}_rec'
-                                 .format(seed),
-                    dtype=np.float64)[8:].reshape(-1, 4)
-                gt['x'], gt['y'], gt['z'] = ds[:, 0], ds[:, 1], ds[:, 2]
-                model.mock.random_array = rs
-                model.NR = rs.shape[0]
-            # perform statistics on model.mock.galaxy_table
-            do_auto_count(model, mode='smu')
-            do_subcross_count(model, N_sub=N_sub)
-            xi_s_mu, xi_0, xi_2 = do_auto_correlation(model, mode='smu')
-            do_subcross_correlation(model, N_sub=N_sub)
-            do_auto_count(model, mode='wp')
-            wp = do_auto_correlation(model, mode='wp')
-            print('Finished r = {}.'.format(r))
+            gt_path_input = None
+        model = populate_model(halocat, model, gt_path=gt_path_input,
+                               add_rsd=add_rsd, N_threads=N_threads)
+        gt = model.mock.galaxy_table
+        model.ND = len(gt)
+        # save galaxy table
+        if not reuse_galaxies and save_hod_realisation:
+            print('Saving galaxy table for r = {} ...'.format(r))
+            try:
+                os.makedirs(os.path.dirname(gt_path))
+            except OSError:
+                pass
+            gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
+        # save galaxy table metadata to sim directory, one file for each
+        # to be combined later to avoid threading conflicts
+        N_cen = np.sum(gt['gal_type'] == 'centrals')
+        N_sat = np.sum(gt['gal_type'] == 'satellites')
+        assert N_cen + N_sat == model.ND
+        gt_meta = table.Table(
+                [[model_name], [phase], [r], [seed],
+                 [N_cen], [N_sat], [model.ND]],
+                names=('model name', 'phase', 'realisation', 'seed',
+                       'N centrals', 'N satellites', 'N galaxies'),
+                dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+        if not os.path.exists(os.path.join(save_dir, 'galaxy_table_meta')):
+            os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
+        gt_meta.write(os.path.join(
+            save_dir, 'galaxy_table_meta',
+            '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
+            format='ascii.fast_csv', overwrite=True)
+        # pre-reconstruction auto-correlation with FT
+        print('pre-recon, FT')
+        m = np.zeros(len(gt)).reshape(-1, 1)
+        arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
+        arr.tofile('/home/dyt/store/recon_temp/gal_cat-{}.dat'.format(seed),
+                   sep='')
+        subprocess.call(['python', './recon/read/read.py',
+                         str(phase), str(seed)])
+        subprocess.call(['python', './recon/reconstruct/reconst.py',
+                         '0', str(phase), str(seed), model_name, recon_dir])
+        nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}'
+                                    .format(seed),
+                                    dtype=np.float64)[8:].reshape(-1, 4))
+        model.mock.numerical_randoms = nr
+        # pre-recon auto-corr with pair-counting, analytical & numerical random
+        print('pre-recon, pair-counting')
+        do_auto_correlation(model, mode='smu-pre_recon',
+                            use_numerical_randoms=True)
+        do_auto_correlation(model, mode='wp-pre_recon')
+        # apply standard reconstruction and calculate covariance matrix
+        print('standard recon')
+        subprocess.call(['python', './recon/reconstruct/reconst.py',
+                         '1', str(phase), str(seed), model_name, recon_dir])
+        ds = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_D-{}_rec'
+                                    .format(seed),
+                                    dtype=np.float64)[8:].reshape(-1, 4))
+        nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}_rec'
+                                    .format(seed),
+                                    dtype=np.float64)[8:].reshape(-1, 4))
+        gt['x'], gt['y'], gt['z'] = ds[:, 0], ds[:, 1], ds[:, 2]
+        model.mock.numerical_randoms = nr
+        do_auto_correlation(model, mode='smu-post_recon',
+                            use_numerical_randoms=True)
+        do_auto_correlation(model, mode='wp-post_recon')
+        do_subcross_correlation(model, N_sub=N_sub, mode='post_recon',
+                                use_numerical_randoms=False)
+        print('Finished r = {}.'.format(r))
     except Exception as E:
         print('Exception caught in worker thread r = {}'.format(r))
         traceback.print_exc()
         raise E
-
-    return xi_s_mu, xi_0, xi_2, wp
 
 
 def do_realisations(halocat, model_name, phase, N_reals):
@@ -917,33 +830,41 @@ def do_realisations(halocat, model_name, phase, N_reals):
     then co-add them and get a single set of xi data
     the rest of the programme will work as if there is only 1 realisation
     '''
-    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+    # sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+    sim_name = halocat.header['SimName']
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
     with closing(Pool(processes=8, maxtasksperchild=1)) as p:
-        ans = p.map(partial(do_realisation, model_name=model_name),
-                    range(N_reals))
+        p.map(partial(do_realisation, model_name=model_name),
+              range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
           .format(N_reals, model_name))
-    # print('Co-adding auto-correlation from {} realisations for model {}...'
-    #       .format(N_reals, model_name))
-    xi_s_mu_list = [corr[0] for corr in ans]
-    xi_0_list = [corr[1] for corr in ans]
-    xi_2_list = [corr[2] for corr in ans]
-    wp_list = [corr[3] for corr in ans]
-    outputs = coadd_xi_list([xi_s_mu_list, xi_0_list, xi_2_list, wp_list])
-    filenames = ['auto-xi_s_mu-ca.txt', 'auto-xi_s_mu-err.txt',
-                 'auto-xi_0-ca.txt', 'auto-xi_0-err.txt',
-                 'auto-xi_2-ca.txt', 'auto-xi_2-err.txt',
-                 'auto-wp-ca.txt', 'auto-wp-err.txt']
+
+
+def coadd_realisations(model_name, phase, N_reals):
+
+    # Co-add auto-correlation results from all realisations
+    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     filedir = os.path.join(save_dir, sim_name, 'z{}'.format(redshift))
-    paths = [os.path.join(filedir, '{}-{}'.format(model_name, fn))
-             for fn in filenames]
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    for i, output in enumerate(outputs):
-        np.savetxt(paths[i], output, fmt=txtfmt)
+    print('Coadding {} realisations for phase {}...'.format(N_reals, phase))
+    for fn in coadd_filenames:
+        temp = os.path.join(
+            save_dir, sim_name, 'z{}-r*'.format(redshift), '*'+fn+'*')
+        paths = glob(temp)
+        print('temp is:', temp)
+        print('paths are:', paths)
+        assert len(paths) == N_reals
+        corr_list = [np.loadtxt(path) for path in paths]
+        coadd, error = coadd_correlation(corr_list)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
+            coadd, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
+            error, fmt=txtfmt)
 
 
 def combine_galaxy_table_metadata():
@@ -1000,9 +921,10 @@ if __name__ == "__main__":
             halocat = process_rockstar_halocat(halocat, N_cut)
         for model_name in model_names:
             do_realisations(halocat, model_name, phase, N_reals)
+            coadd_realisations(model_name, phase, N_reals)
 
     for model_name in model_names:
-        do_coadd_phases(model_name, coadd_phases=phases)
+        coadd_phases(model_name, coadd_phases=phases)
         do_cov(model_name, N_sub=N_sub, cov_phases=phases)
     combine_galaxy_table_metadata()
 
