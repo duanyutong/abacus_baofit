@@ -480,10 +480,9 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
             model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
         elif os.path.exists(gt_path):
             print('Loading existing galaxy table: {}'.format(gt_path))
-            model.mock.galaxy_table = table.Table.read(gt_path)
+            model.mock.galaxy_table = gt = table.Table.read(gt_path)
             for pos in ['x', 'y', 'z']:
-                model.mock.galaxy_table[pos] = \
-                    model.mock.galaxy_table[pos].astype(np.float32)
+                gt[pos] = gt[pos].astype(np.float32)
 
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))
