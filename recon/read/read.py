@@ -27,7 +27,7 @@ no_FKP   = "y"           #  Not to use "FKP" as weight
 inp_total_num = "y"      #  To input the total number of particles in advance
 
 #******* Options *********
-data = np.fromfile('/home/dyt/store/recon_temp/gal_cat-'+tag+'.dat', dtype=np.float32).reshape(-1, 4)
+data = np.fromfile('/home/dyt/store/recon/temp/gal_cat-'+tag+'.dat', dtype=np.float32).reshape(-1, 4)
 total_par_ori_inp = data.shape[0]  # number of galaxy data
 
 ngridCube = 480

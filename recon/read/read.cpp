@@ -541,13 +541,13 @@ class RVZelParticle {
         string in_path = p_to_me + p_typesim + p_sim + p_z;
         string out_path = p_to_me + p_typesim + p_sim + p_z + "/gal" + p_op;
       #endif
-      out_path = "/home/dyt/store/recon_temp/"; //out_path += p_sample + p_rsd;
+      out_path = "/home/dyt/store/recon/temp/"; //out_path += p_sample + p_rsd;
       // initial
       string in_path_ini = p_to_me + p_typesim + p_sim + "/ini/IC/scratch";
       // #ifdef INITIAL
       //   out_path = p_to_me + p_typesim + p_sim + "/ini" + p_sample_ini;
       // #endif
-      in_path = "/home/dyt/store/recon_temp/"; //in_path += "/";
+      in_path = "/home/dyt/store/recon/temp/"; //in_path += "/";
       in_path_ini += "/";
     #endif
 

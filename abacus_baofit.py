@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon'  # 'z0.5'
+tagout = 'pre-recon'  # 'z0.5'
 phases = range(2)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -46,6 +46,7 @@ N_reals = 1  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_threads = 30  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
+random_multiplier = 1
 
 # %% flags
 reuse_galaxies = True
@@ -71,14 +72,14 @@ halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
-coadd_filenames = ['wp-pre_recon',
-                   'xi-smu-pre_recon-ar', 'xi-smu-pre_recon-nr',
-                   'xi_0-smu-pre_recon-ar', 'xi_0-smu-pre_recon-nr',
-                   'xi_2-smu-pre_recon-ar', 'xi_2-smu-pre_recon-nr',
-                   'wp-post_recon',
-                   'xi-smu-post_recon-ar', 'xi-smu-post_recon-nr',
-                   'xi_0-smu-post_recon-ar', 'xi_0-smu-post_recon-nr',
-                   'xi_2-smu-post_recon-ar', 'xi_2-smu-post_recon-nr']
+coadd_filenames = ['wp-pre-recon',
+                   'xi-smu-pre-recon-ar', 'xi-smu-pre-recon-nr',
+                   'xi_0-smu-pre-recon-ar', 'xi_0-smu-pre-recon-nr',
+                   'xi_2-smu-pre-recon-ar', 'xi_2-smu-pre-recon-nr',
+                   'wp-post-recon-std',
+                   'xi-smu-post-recon-std-ar', 'xi-smu-post-recon-std-nr',
+                   'xi_0-smu-post-recon-std-ar', 'xi_0-smu-post-recon-std-nr',
+                   'xi_2-smu-post-recon-std-ar', 'xi_2-smu-post-recon-std-nr']
 
 # # %% MP Class
 # class NoDaemonProcess(Process):
@@ -174,10 +175,10 @@ def rebin_smu_counts(cts):
         npairs[m, n] = arr['npairs'].sum()
         savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
         bins_included = bins_included + cts['npairs'][mask].size
-    # print('Total DD fine bins: {}. Total bins included: {}'
-    #       .format(cts.size, bins_included))
-    # print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
-    #       .format(cts['npairs'].sum(), npairs.sum()))
+    print('Total DD fine bins: {}. Total bins included: {}'
+          .format(cts.size, bins_included))
+    print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
+          .format(cts['npairs'].sum(), npairs.sum()))
     indices = np.where(npairs == 0)  # check if all bins are filled
     if len(indices[0]) != 0:  # print problematic bins if any is empty
         for i in range(len(indices[0])):
@@ -404,12 +405,12 @@ def fit_c_median(phases=range(16)):
     return halocats
 
 
-def do_auto_correlation(model, mode='smu-pre_recon',
-                        use_numerical_randoms=True):
+def do_auto_correlation(model, mode='smu-pre-recon',
+                        use_grid_randoms=False):
 
     '''
     mode is a string that contains 'smu' or 'wp', and can include
-    pre/post-reconstruction tag which gets saved as part of filename
+    pre/post-recon tag which gets saved as part of filename
     '''
     # do pair counting in 1 Mpc bins
     sim_name = model.mock.header['SimName']
@@ -444,7 +445,7 @@ def do_auto_correlation(model, mode='smu-pre_recon',
                                 .format(model_name, mode)),
                    DD, fmt=txtfmt)
         model.ND = ND = len(model.mock.galaxy_table)
-        NR = 200 * ND
+        NR = random_multiplier * ND
         DR_ar, _, RR_ar = analytic_random(
                 ND, NR, ND, NR, s_bins, mu_bins, Lbox.prod())
         np.savetxt(os.path.join(filedir,
@@ -465,47 +466,47 @@ def do_auto_correlation(model, mode='smu-pre_recon',
             np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-ar.txt'
                                     .format(model_name, tag, mode)),
                        output, fmt=txtfmt)
-        if use_numerical_randoms:
-            if hasattr(model.mock, 'numerical_randoms'):
-                model.NR = NR = model.mock.numerical_randoms.shape[0]
-                xr = model.mock.numerical_randoms[:, 0]
-                yr = model.mock.numerical_randoms[:, 1]
-                zr = model.mock.numerical_randoms[:, 2]
-            else:
-                print('No grid numerical randoms found. Assuming NR=ND.')
-                model.NR = NR = model.ND
-                xr = np.random.uniform(0, L, NR).astype(np.float32)
-                yr = np.random.uniform(0, L, NR).astype(np.float32)
-                zr = np.random.uniform(0, L, NR).astype(np.float32)
-            DRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                          x, y, z, X2=xr, Y2=yr, Z2=zr,
-                          periodic=True, verbose=True, output_savg=True,
-                          boxsize=L, c_api_timer=False)
-            RRnpy = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
-                          xr, yr, zr,
-                          periodic=True, verbose=True, output_savg=True,
-                          boxsize=L, c_api_timer=False)
-            DR_nr, _ = rebin_smu_counts(DRnpy)
-            RR_nr, _ = rebin_smu_counts(RRnpy)
-            np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}-nr.npy'
-                                 .format(model_name, mode)),
-                    DRnpy)
-            np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}-nr.npy'
-                                 .format(model_name, mode)),
-                    RRnpy)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-DR-{}-nr_rebinned.txt'
-                                    .format(model_name, mode)),
-                       DR_nr, fmt=txtfmt)
-            np.savetxt(os.path.join(filedir,
-                                    '{}-auto-paircount-RR-{}-nr_rebinned.txt'
-                                    .format(model_name, mode)),
-                       RR_nr, fmt=txtfmt)
-            for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                                   ['xi', 'xi_0', 'xi_2']):
-                np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-nr.txt'
-                                        .format(model_name, tag, mode)),
-                           output, fmt=txtfmt)
+        if use_grid_randoms and hasattr(model.mock, 'numerical_randoms'):
+            model.NR = NR = model.mock.numerical_randoms.shape[0]
+            xr = model.mock.numerical_randoms[:, 0]
+            yr = model.mock.numerical_randoms[:, 1]
+            zr = model.mock.numerical_randoms[:, 2]
+        else:
+            print('No grid numerical randoms found. Using random multiplier {}.'
+                  .format(random_multiplier))
+            model.NR = NR = random_multiplier * model.ND
+            xr = np.random.uniform(0, L, NR).astype(np.float32)
+            yr = np.random.uniform(0, L, NR).astype(np.float32)
+            zr = np.random.uniform(0, L, NR).astype(np.float32)
+        DRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                      x, y, z, X2=xr, Y2=yr, Z2=zr,
+                      periodic=True, verbose=False, output_savg=True,
+                      boxsize=L, c_api_timer=False)
+        RRnpy = DDsmu(1, N_threads, s_bins_counts, mu_max, n_mu_bins,
+                      xr, yr, zr,
+                      periodic=True, verbose=False, output_savg=True,
+                      boxsize=L, c_api_timer=False)
+        DR_nr, _ = rebin_smu_counts(DRnpy)
+        RR_nr, _ = rebin_smu_counts(RRnpy)
+        np.save(os.path.join(filedir, '{}-auto-paircount-DR-{}-nr.npy'
+                             .format(model_name, mode)),
+                DRnpy)
+        np.save(os.path.join(filedir, '{}-auto-paircount-RR-{}-nr.npy'
+                             .format(model_name, mode)),
+                RRnpy)
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-DR-{}-nr_rebinned.txt'
+                                .format(model_name, mode)),
+                   DR_nr, fmt=txtfmt)
+        np.savetxt(os.path.join(filedir,
+                                '{}-auto-paircount-RR-{}-nr_rebinned.txt'
+                                .format(model_name, mode)),
+                   RR_nr, fmt=txtfmt)
+        for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
+                               ['xi', 'xi_0', 'xi_2']):
+            np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-nr.txt'
+                                    .format(model_name, tag, mode)),
+                       output, fmt=txtfmt)
     elif 'wp' in mode:  # also returns wp in addition to counts
         DD = wp(L, pi_max, N_threads, rp_bins, x, y, z,
                 output_rpavg=True, verbose=False, c_api_timer=False)
@@ -515,8 +516,8 @@ def do_auto_correlation(model, mode='smu-pre_recon',
                    wp_txt, fmt=txtfmt)
 
 
-def do_subcross_correlation(model, N_sub=3, mode='post_recon',
-                            use_numerical_randoms=False):
+def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
+                            use_grid_randoms=False):
     '''
     cross-correlation between 1/N_sub^3 of a box and the whole box
     can be pre/post-reconstruction data
@@ -550,7 +551,7 @@ def do_subcross_correlation(model, N_sub=3, mode='post_recon',
                              .format(model_name, linind)),
                 DDnpy)
         # use_analytic_randoms:
-        NR1, NR2 = 200 * ND1, 200 * ND2
+        NR1, NR2 = random_multiplier * ND1, random_multiplier * ND2
         DR, RD, RR = analytic_random(
                 ND1, NR1, ND2, NR2, s_bins, mu_bins, Lbox.prod())
         for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
@@ -570,14 +571,14 @@ def do_subcross_correlation(model, N_sub=3, mode='post_recon',
                                     '{}-cross_{}-{}-{}-ar.txt'
                                     .format(model_name, linind, tag, mode)),
                        output, fmt=txtfmt)
-        if use_numerical_randoms:
+        if use_grid_randoms: 
             # calculate D2Rbox by brute force sampling, where
             # Rbox sample is homogeneous in volume of box
             # force float32 (a.k.a. single precision float in C)
             # to be consistent with galaxy table precision
             # otherwise corrfunc raises an error
             if hasattr(model.mock, 'numerical_randoms'):
-                nr = model.mock.random_array  # random shifted array
+                nr = model.mock.numerical_randoms  # random shifted array
                 xr1, yr1, zr1 = nr[:, 0], nr[:, 1], nr[:, 2]
                 mask = ((L_sub * i < xr1) & (xr1 <= L_sub * (i+1)) &
                         (L_sub * j < yr1) & (yr1 <= L_sub * (j+1)) &
@@ -586,6 +587,8 @@ def do_subcross_correlation(model, N_sub=3, mode='post_recon',
                 NR1 = xr1.size
                 NR2 = xr2.size
             else:
+                print('No grid numerical randoms found. '
+                      'Using random multiplier {}'.format(random_multiplier))
                 xr1 = np.random.uniform(0, L, NR1).astype(np.float32)
                 yr1 = np.random.uniform(0, L, NR1).astype(np.float32)
                 zr1 = np.random.uniform(0, L, NR1).astype(np.float32)
@@ -694,7 +697,7 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
     #     np.savetxt(filepath, cov, fmt=txtfmt)
 
     # calculate monoquad cov for baofit, 4 types of covariance
-    for recon, rand in product(['pre_recon', 'post_recon'], ['ar', 'nr']):
+    for recon, rand in product(['pre-recon', 'post-recon-std'], ['ar', 'nr']):
         xi_list = []
         for phase in cov_phases:
             sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -782,47 +785,46 @@ def do_realisation(r, model_name):
             '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
             format='ascii.fast_csv', overwrite=True)
         # pre-reconstruction auto-correlation with FT
-        print('pre-recon, FT')
+        print('Now calculating pre-recon FT...')
         m = np.zeros(len(gt))
         arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
-        arr.tofile('/home/dyt/store/recon_temp/gal_cat-{}.dat'.format(seed),
+        arr.tofile('/home/dyt/store/recon/temp/gal_cat-{}.dat'.format(seed),
                    sep='')
         subprocess.call(['python', './recon/read/read.py',
                          str(phase), str(seed)])
         subprocess.call(['python', './recon/reconstruct/reconst.py',
                          '0', str(phase), str(seed), model_name, recon_dir])
-        nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}'
+        nr = np.float32(np.fromfile('/home/dyt/store/recon/temp/file_R-{}'
                                     .format(seed),
                                     dtype=np.float64)[8:].reshape(-1, 4))
         nr[nr < 0] += 1100  # read.cpp re-wraps data above 550 to negative pos
-        print('nr max, min', nr.max(), nr.min())
         model.mock.numerical_randoms = nr
         # pre-recon auto-corr with pair-counting, analytical & numerical random
-        print('pre-recon, pair-counting')
-        do_auto_correlation(model, mode='smu-pre_recon',
-                            use_numerical_randoms=True)
-        do_auto_correlation(model, mode='wp-pre_recon')
-        do_subcross_correlation(model, N_sub=N_sub, mode='pre_recon',
-                                use_numerical_randoms=False)
+        print('Now calculating pre-recon pair-counting...')
+        do_auto_correlation(model, mode='smu-pre-recon',
+                            use_grid_randoms=False)
+        do_auto_correlation(model, mode='wp-pre-recon')
+        do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
+                                use_grid_randoms=False)
         # apply standard reconstruction and calculate covariance matrix
-        print('standard recon')
+        print('Now calculating standard recon...')
         subprocess.call(['python', './recon/reconstruct/reconst.py',
                          '1', str(phase), str(seed), model_name, recon_dir])
-        ds = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_D-{}_rec'
+        ds = np.float32(np.fromfile('/home/dyt/store/recon/temp/file_D-{}_rec'
                                     .format(seed),
                                     dtype=np.float64)[8:].reshape(-1, 4))
-        nr = np.float32(np.fromfile('/home/dyt/store/recon_temp/file_R-{}_rec'
+        nr = np.float32(np.fromfile('/home/dyt/store/recon/temp/file_R-{}_rec'
                                     .format(seed),
                                     dtype=np.float64)[8:].reshape(-1, 4))
         ds[ds < 0] += 1100  # undo wrapping by read.cpp for data_shifted
         nr[nr < 0] += 1100  # undo wrapping by read.cpp for numerical randoms
         gt['x'], gt['y'], gt['z'] = ds[:, 0], ds[:, 1], ds[:, 2]
         model.mock.numerical_randoms = nr
-        do_auto_correlation(model, mode='smu-post_recon',
-                            use_numerical_randoms=True)
-        do_auto_correlation(model, mode='wp-post_recon')
-        do_subcross_correlation(model, N_sub=N_sub, mode='post_recon',
-                                use_numerical_randoms=False)
+        do_auto_correlation(model, mode='smu-post-recon-std',
+                            use_grid_randoms=False)
+        do_auto_correlation(model, mode='wp-post-recon-std')
+        do_subcross_correlation(model, N_sub=N_sub, mode='post-recon-std',
+                                use_grid_randoms=True)
         print('Finished r = {}.'.format(r))
     except Exception as E:
         print('Exception caught in worker thread r = {}'.format(r))

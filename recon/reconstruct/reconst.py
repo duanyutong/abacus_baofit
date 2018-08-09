@@ -39,10 +39,6 @@ SECOND = ""               # To take account of 2nd order in reconstruction
 
 INITIAL = ""             # To compute the corr for the initial density correlation function
 
-if reconst == '0':
-    RECONST = ""
-elif reconst == '1':
-    RECONST = "y"             # To reconsturuct (standard by default)
 #******* Options *********
 #------ run -------
 ngridCube = 480
@@ -85,7 +81,7 @@ ite_weight_2 = 0.5     #  [2nd]   (next) = w1*(estimate) + (1-w1)*(previous)
 # last_sm = 10.0:  ite_times =  9, ite_weight_ini = ite_weight_2 = 0.5
 # last_sm = 15.0:  ite_times =  6, ite_weight_ini = ite_weight_2 = 0.7
 
-bias = 1.00  # 1.00            #  for matter field by default
+bias = 2.23  # 1.00            #  for matter field by default
 bias_uncer = 0         #  uncertainty of bais 
                        #  -1 :   80 % 
                        #   0 :  100 %      
@@ -99,7 +95,7 @@ typesim = 0            # the type of Simulation
                        #  1 :  Others        (BOSS, etc.)
                        #  2 :  ST            (T.Sunayama provided)
 boxsizesim = 1100      # if typesim = 0,  1100 or 720
-phase = 1           # the number of realization
+# phase = 1           # the number of realization
 
 typehalo = 0           # if typesim = 0 or 1,
                        #  0 :  FoF
@@ -244,8 +240,8 @@ inp_c_var_l = 0
 # sample_ini_in_d  = sample_ini_d
 
 # input
-infile = '/home/dyt/store/recon_temp/file_D-' + tag  # infile  = path_input + typeobject_d + sample_in_d + space_d + "/file_D"
-infile2 = '/home/dyt/store/recon_temp/file_R-' + tag  # infile2 = path_input + typeobject_d + sample_in_d + space_d + "/file_R"
+infile = '/home/dyt/store/recon/temp/file_D-' + tag  # infile  = path_input + typeobject_d + sample_in_d + space_d + "/file_D"
+infile2 = '/home/dyt/store/recon/temp/file_R-' + tag  # infile2 = path_input + typeobject_d + sample_in_d + space_d + "/file_R"
 
 infile_ini = infile  # path_input_ini + sample_ini_in_d + "/file_D"
 infile_ini2 = infile2  # path_input_ini + sample_ini_in_d + "/file_R"
@@ -276,21 +272,21 @@ shift_true_z = infile + "_S2"
 #     XCORR_DENSITY = ""
 #     RECONST = ""
 sig_sm = sig_sm_std
-if not(RECONST):
+if reconst == '0':
     # run_id  = run_ori
-    recon_tag = 'pre_recon'
-else:
+    recon_tag = 'pre-recon'
+elif reconst == '1':
     if not(ITERATION):
         # run_id = run_std
-        recon_tag = '-post_recon_std'
+        recon_tag = 'post-recon-std'
     else:
         # run_id  = run_ite
         sig_sm = sig_sm_ite
-        recon_tag = '-post_recon_ite'
+        recon_tag = 'post-recon-ite'
 
 
 # output
-path_output = '/home/dyt/store/recon_temp'
+path_output = '/home/dyt/store/recon/temp'
 
 outfile = os.path.join(save_dir, '{}-auto-ft_result-{}.log'
                        .format(model_name, recon_tag))
@@ -332,22 +328,22 @@ outfile_xcorr_de = path_output + "/xcorr_dense" + tag + ".dat"
 ##########  Make  ###########
 
 # creating flags
-def flag_create():
-    FLAG = ""
-    for k, v in globals().items():
-        if id(v) == id("y"):
-            FLAG += " -D" + k
-    return FLAG
+# def flag_create():
+#     FLAG = ""
+#     for k, v in globals().items():
+#         if id(v) == id("y"):
+#             FLAG += " -D" + k
+#     return FLAG
 
-OMP = " -DOPENMP -DFFTSLAB -DSLAB"
-FLAGS = OMP + flag_create()
+# OMP = " -DOPENMP -DFFTSLAB -DSLAB"
+# FLAGS = OMP + flag_create()
 
-cmd_make = ["make", "CXXFLAGS=-O3" + FLAGS]
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-if(inp_make):
-    subprocess.call(["make", "clean"])
-    #print(cmd_make)
-    subprocess.call(cmd_make)
+# cmd_make = ["make", "CXXFLAGS=-O3" + FLAGS]
+# os.chdir(os.path.dirname(os.path.abspath(__file__)))
+# # if(inp_make):
+# subprocess.call(["make", "clean"])
+# #print(cmd_make)
+# subprocess.call(cmd_make)
 
 
 ##########  Run  ###########
@@ -385,7 +381,7 @@ OPTIONS = ["-ngrid", str(ngridCube), \
            "-outxcorrsh", outfile_xcorr_sh, \
            "-outxcorrde", outfile_xcorr_de \
            ]
-
-cmd_run = ["./reconst"] + OPTIONS
-if (not inp_make and inp_run):
-    subprocess.call(cmd_run)
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+cmd_run = ["./reconst_" + reconst] + OPTIONS
+# if (not inp_make and inp_run):
+subprocess.call(cmd_run)
