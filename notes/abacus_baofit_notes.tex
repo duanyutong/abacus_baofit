@@ -209,6 +209,8 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 		\end{figure}
 		
 		Then we jackknife co-add the 16 boxes, dropping one box at a time and taking the mean of the other 15. This yields 16 jackknife correlation function samples, and each one is passed on to the fitter for BAO fitting.
+		
+		To be consistent with FFT correlation code, BAo analysis has switched to the Landy \& Szalay (1993) estimator defined in Appendix \ref{appendix_LS}.
 
 	\subsection{Covariance Matrix}
 		
@@ -391,5 +393,14 @@ Precision measurement of the BAO signal from galaxy correlation functions requir
 		R_1 D_2 = \frac{N_\text{R1} N_\text{D2}}{V_1} \dif V(s, \mu) = \bar{n}_\text{R1} N_\text{D2} \dif V(s, \mu).
 	\end{equation}
 
+\section{LS Estimator}
+	\label{appendix_LS}
 
+	We use a generalised form of the Landy \& Szalay (1993) estimator to calculate auto- and cross-correlation functions. Given data samples $D_1, D_2$ and random samples $R_1, R_2$ with sample sizes $N_{D1}, N_{D2}, N_{R1}, N_{R2}$, the correlation as a function of pair-counts is
+	\begin{align}
+		\xi &= \frac{\dfrac{D_1D_2}{N_{D1}N_{D2}} - \dfrac{D_1R_2}{N_{D1}N_{R2}} - \dfrac{R_1D_2}{N_{R1}N_{D2}} + \dfrac{R_1R_2}{N_{R1}N_{R2}}}{\dfrac{R_1R_2}{N_{R1}N_{R2}}} \\
+			&= \frac{\overline{DD} - \overline{DR} - \overline{RD} + \overline{RR}}{\overline{RR}}
+	\end{align}
+	where overline means normalised by sample population sizes, i.e. each pair-count is weighted by $1/N_1N_2$. For auto-correlation, we may simply set $D_1 = D_2$ and $R_1 = R_2$.
+	
 \end{document}

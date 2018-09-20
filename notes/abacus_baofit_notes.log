@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.14159265-2.6-0.99999 (MiKTeX 2.9.6600 64-bit) (preloaded format=xelatex 2018.2.9)  18 JUL 2018 10:54
+This is XeTeX, Version 3.14159265-2.6-0.99999 (MiKTeX 2.9.6600 64-bit) (preloaded format=xelatex 2018.2.9)  10 SEP 2018 16:46
 entering extended mode
 **./abacus_baofit_notes.tex
 (abacus_baofit_notes.tex
@@ -2282,11 +2282,11 @@ File: xi_r10_phases_tinker13.png Graphic file (type bmp)
 File: alpha_pair_compare.png Graphic file (type bmp)
 <alpha_pair_compare.png>
  (abacus_baofit_notes.bbl) [9] [10] [11]
-Package atveryend Info: Empty hook `AfterLastShipout' on input line 395.
+Package atveryend Info: Empty hook `AfterLastShipout' on input line 406.
 
 (abacus_baofit_notes.aux)
-Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 395.
-Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 395.
+Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 406.
+Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 406.
 
 
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
@@ -2294,7 +2294,7 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
  ) 
 Here is how much of TeX's memory you used:
  24733 strings out of 427844
- 430524 string characters out of 3152668
+ 430527 string characters out of 3152668
  570616 words of memory out of 3000000
  28514 multiletter control sequences out of 15000+200000
  567132 words of font info for 132 fonts, out of 3000000 for 9000

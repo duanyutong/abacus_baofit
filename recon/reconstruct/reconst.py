@@ -5,7 +5,8 @@ This automizes the process inputting, reconstructing, computing correlations,
 and plotting figures.
 
 '''
-
+from __future__ import (
+        absolute_import, division, print_function, unicode_literals)
 # import numpy as np
 import sys
 import subprocess, os
@@ -13,15 +14,14 @@ import subprocess, os
 # mpl.use('AGG')
 # import matplotlib.pyplot as plt
 
-
+# input arguments
 reconst = sys.argv[1]
 phase = sys.argv[2]
 tag = sys.argv[3]
 model_name = sys.argv[4]
 save_dir = sys.argv[5]
-
-inp_make = ""
-inp_run = "y"
+# inp_make = ""
+# inp_run = "y"
 
 #******* Flags (for make) *********
 RSD = "y"                 # To take account of RSD in reconstruction
@@ -32,7 +32,7 @@ DIFF_SHIFT = ""          # To sum the square of difference between shift_t_X and
 
 XCORR_DENSITY = ""       # To get X-correlation for density fields
 
-ITERATION = ""           # To do the iterative reconstruction
+# ITERATION = ""           # To do the iterative reconstruction
 
 CHANGE_SM = "y"           # To change smoothing scale
 SECOND = ""               # To take account of 2nd order in reconstruction
@@ -43,9 +43,9 @@ INITIAL = ""             # To compute the corr for the initial density correlati
 #------ run -------
 ngridCube = 480
 ngrid = [ -1, -1, -1]
-maxell = 4
+maxell = 2
 
-sep = 155.0            # Default to max_sep from the file
+sep = 150.0            # Default to max_sep from the file
 dsep = 5.00
 
 kmax = 1.00
@@ -61,27 +61,42 @@ Ol_0 = 0.685847        #  dark energy parameter, planck
 #Om_0 = 0.2648          #  matter parameter, ST
 #Ol_0 = 0.7352          #  dark energy parameter, ST
 
-# for standard
+sig_sm = 15.0
 sig_sm_std = 15.0        # [Mpc/h], proper smoothing scale
+sig_sm_ite = 15.0        # [Mpc/h], initial smoothing scale
 
-# for iteration
-sig_sm_ite = 20.0        # [Mpc/h], initial smoothing scale
+if reconst == '0':
+    RECONST = ""
+    ITERATION = ""
+    recon_tag = 'pre-recon'
+elif reconst == '1':
+    RECONST = "y"
+    ITERATION = ""
+    sig_sm = sig_sm_std
+    recon_tag = 'post-recon-std'
+elif reconst == '2':
+    RECONST = "y"
+    ITERATION = "y"
+    sig_sm = sig_sm_ite
+    recon_tag = 'post-recon-ite'
+    
+
 divi_sm = 1.2          #  by which sig_sm is divided each time
 last_sm = 10.0         #  to which the division is performed
 C_ani = 1.3            #  the ratio of z-axis and x,y-axis
 f_eff = 1.0            #  effective linear growth rate
 
-ite_times = 9          #  how many times do we iterate reconstruction
+ite_times = 6          #  how many times do we iterate reconstruction
 ite_switch = 0         #  when switching to ite_weight_2
-ite_weight_ini = 0.5  #  [ini]   (next) = w1*(estimate) + (1-w1)*(previous)
-ite_weight_2 = 0.5     #  [2nd]   (next) = w1*(estimate) + (1-w1)*(previous)
+ite_weight_ini = 0.7   #  [ini]   (next) = w1*(estimate) + (1-w1)*(previous)
+ite_weight_2 = 0.7     #  [2nd]   (next) = w1*(estimate) + (1-w1)*(previous)
 
 # last_sm =  5.0:  ite_times = 17, ite_weight_ini = ite_weight_2 = 0.3
 # last_sm =  7.0:  ite_times = 13, ite_weight_ini = ite_weight_2 = 0.4
 # last_sm = 10.0:  ite_times =  9, ite_weight_ini = ite_weight_2 = 0.5
 # last_sm = 15.0:  ite_times =  6, ite_weight_ini = ite_weight_2 = 0.7
 
-bias = 2.23  # 1.00            #  for matter field by default
+bias = 1.00            #  for matter field by default
 bias_uncer = 0         #  uncertainty of bais 
                        #  -1 :   80 % 
                        #   0 :  100 %      
@@ -132,7 +147,6 @@ ratio_RtoD_ini = 0     #  ratio of the number of Random and Data
 num_parcentage_ini = 1 #  parcentage of particle used
 typeFKP_ini = 0        # the type of estimator
                        #  0 : not FKP,  1 : FKP
-
 #----------------------
 
 if ((not typeobject == 0) or (not RECONST)) and (XCORR_SHIFT):
@@ -240,8 +254,8 @@ inp_c_var_l = 0
 # sample_ini_in_d  = sample_ini_d
 
 # input
-infile = '/home/dyt/store/recon/temp/file_D-' + tag  # infile  = path_input + typeobject_d + sample_in_d + space_d + "/file_D"
-infile2 = '/home/dyt/store/recon/temp/file_R-' + tag  # infile2 = path_input + typeobject_d + sample_in_d + space_d + "/file_R"
+infile = '/home/dyt/store/recon/temp/file_D-' + tag # infile  = path_input + typeobject_d + sample_in_d + space_d + "/file_D"
+infile2 = '/home/dyt/store/recon/temp/file_R-' + tag # infile2 = path_input + typeobject_d + sample_in_d + space_d + "/file_R"
 
 infile_ini = infile  # path_input_ini + sample_ini_in_d + "/file_D"
 infile_ini2 = infile2  # path_input_ini + sample_ini_in_d + "/file_R"
@@ -271,30 +285,18 @@ shift_true_z = infile + "_S2"
 #     XCORR_SHIFT = ""
 #     XCORR_DENSITY = ""
 #     RECONST = ""
-sig_sm = sig_sm_std
-if reconst == '0':
-    # run_id  = run_ori
-    recon_tag = 'pre-recon'
-elif reconst == '1':
-    if not(ITERATION):
-        # run_id = run_std
-        recon_tag = 'post-recon-std'
-    else:
-        # run_id  = run_ite
-        sig_sm = sig_sm_ite
-        recon_tag = 'post-recon-ite'
-
 
 # output
+
+
+outfile = os.path.join(save_dir, '{}-auto-ft_result-{}-{}_hmpc.log'
+                       .format(model_name, recon_tag, sig_sm))
+outfile_corr = os.path.join(save_dir, '{}-auto-ft_corr_N-{}-{}_hmpc.txt'
+                            .format(model_name, recon_tag, sig_sm))
+outfile_corr2 = os.path.join(save_dir, '{}-auto-ft_corr_R-{}-{}_hmpc.txt'
+                             .format(model_name, recon_tag, sig_sm))
+
 path_output = '/home/dyt/store/recon/temp'
-
-outfile = os.path.join(save_dir, '{}-auto-ft_result-{}.log'
-                       .format(model_name, recon_tag))
-outfile_corr = os.path.join(save_dir, '{}-auto-ft_corr_N-{}.txt'
-                            .format(model_name, recon_tag))
-outfile_corr2 = os.path.join(save_dir, '{}-auto-ft_corr_R-{}.txt'
-                             .format(model_name, recon_tag))
-
 outfile_xcorr_sh = path_output + "/xcorr_shift" + tag + ".dat"
 outfile_xcorr_de = path_output + "/xcorr_dense" + tag + ".dat"
 
@@ -325,25 +327,27 @@ outfile_xcorr_de = path_output + "/xcorr_dense" + tag + ".dat"
 # elif (bias_uncer == 1):
 #     bias *= 1.20
 
-##########  Make  ###########
+#########  Make  ###########
 
-# creating flags
-# def flag_create():
-#     FLAG = ""
-#     for k, v in globals().items():
-#         if id(v) == id("y"):
-#             FLAG += " -D" + k
-#     return FLAG
-
-# OMP = " -DOPENMP -DFFTSLAB -DSLAB"
-# FLAGS = OMP + flag_create()
-
-# cmd_make = ["make", "CXXFLAGS=-O3" + FLAGS]
-# os.chdir(os.path.dirname(os.path.abspath(__file__)))
-# # if(inp_make):
-# subprocess.call(["make", "clean"])
-# #print(cmd_make)
-# subprocess.call(cmd_make)
+## creating flags
+#
+#def flag_create():
+#    FLAG = ""
+#    for k, v in globals().items():
+#        if v == "y":
+#            FLAG += " -D" + k
+#    return FLAG
+#
+#OMP = " -DOPENMP -DFFTSLAB -DSLAB"
+#FLAGS = OMP + flag_create()
+#print('make flags are: ' + FLAGS)
+#
+#cmd_make = ["make", "CXXFLAGS=-O3" + FLAGS]
+#os.chdir(os.path.dirname(os.path.abspath(__file__)))
+## if(inp_make):
+#subprocess.call(["make", "clean"])
+##print(cmd_make)
+#subprocess.call(cmd_make)
 
 
 ##########  Run  ###########
@@ -383,5 +387,6 @@ OPTIONS = ["-ngrid", str(ngridCube), \
            ]
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 cmd_run = ["./reconst_" + reconst] + OPTIONS
+print(' '.join(cmd_run))
 # if (not inp_make and inp_run):
 subprocess.call(cmd_run)

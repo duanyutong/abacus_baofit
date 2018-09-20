@@ -1467,7 +1467,7 @@ class Grid {
             // In this case, we'll place the observer centered in the grid, but
             // then displaced far away in the -x direction
             for (int j=0;j<3;j++) origin[j] = ngrid[j]/2.0;
-            origin[0] -= ngrid[0]*1e6;        // Observer far away!
+            origin[2] -= ngrid[2]*1e4;        // Observer far away!
         } else {
             for (int j=0;j<3;j++) origin[j] = (0.0-posmin[j])/cell_size;
         }
