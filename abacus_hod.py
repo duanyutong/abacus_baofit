@@ -459,10 +459,9 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
             model.mock.populate()
         else:  # model was never populated and mock attribute does not exist
             model.populate_mock(halocat, Num_ptcl_requirement=model.N_cut)
-
+        model.mock.gt_loaded = False
     # use particle-based HOD
     elif model.model_type == 'general':
-
         if hasattr(model, 'mock'):
             # attribute mock present, at least second realisation
             pass
@@ -478,15 +477,15 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
             print('Populating {} halos, r = {}...'
                   .format(len(model.mock.halo_table), model.r))
             model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
+            model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
             print('Loading existing galaxy table: {}'.format(gt_path))
             model.mock.galaxy_table = gt = table.Table.read(gt_path)
             for pos in ['x', 'y', 'z']:
                 gt[pos] = gt[pos].astype(np.float32)
-
+            model.mock.gt_loaded = True
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))
-
     return model
 
 

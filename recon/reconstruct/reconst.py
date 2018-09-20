@@ -289,11 +289,13 @@ shift_true_z = infile + "_S2"
 # output
 
 
-outfile = os.path.join(save_dir, '{}-auto-ft_result-{}-{}_hmpc.log'
+outfile = os.path.join(save_dir, '{}-auto-fftcorr_result-{}-{}_hmpc.log'
                        .format(model_name, recon_tag, sig_sm))
-outfile_corr = os.path.join(save_dir, '{}-auto-ft_corr_N-{}-{}_hmpc.txt'
+if os.path.isfile(outfile):
+    os.remove(outfile)
+outfile_corr = os.path.join(save_dir, '{}-auto-fftcorr_N-{}-{}_hmpc.txt'
                             .format(model_name, recon_tag, sig_sm))
-outfile_corr2 = os.path.join(save_dir, '{}-auto-ft_corr_R-{}-{}_hmpc.txt'
+outfile_corr2 = os.path.join(save_dir, '{}-auto-fftcorr_R-{}-{}_hmpc.txt'
                              .format(model_name, recon_tag, sig_sm))
 
 path_output = '/home/dyt/store/recon/temp'
@@ -387,6 +389,6 @@ OPTIONS = ["-ngrid", str(ngridCube), \
            ]
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 cmd_run = ["./reconst_" + reconst] + OPTIONS
-print(' '.join(cmd_run))
+# print(' '.join(cmd_run))
 # if (not inp_make and inp_run):
 subprocess.call(cmd_run)

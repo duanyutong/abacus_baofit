@@ -31,8 +31,8 @@ from tqdm import tqdm
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon-test'  # 'z0.5'
-phases = [1]  # range(16)  # [0, 1] # list(range(16))
+tagout = 'recon'  # 'z0.5'
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -41,8 +41,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_s1', 'gen_sv1', 'gen_sp1',
                'gen_s1_n', 'gen_sv1_n', 'gen_sp1_n',
                'gen_vel1', 'gen_allbiases', 'gen_allbiases_n']
-model_names = ['gen_base1']
-N_reals = 1  # number of realisations for an HOD
+# model_names = ['gen_base1']
+N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_threads = 4  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
@@ -61,7 +61,7 @@ s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
 mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
 s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0  # for counting
-n_mu_bins = 100  # for couting, mu bin size 0.01
+n_mu_bins = mu_bins.size-1  # for couting, mu bin width 0.01
 pi_max = 150  # for counting
 rp_bins = s_bins
 
@@ -73,15 +73,6 @@ recon_temp_dir = os.path.join(store_dir, 'recon/temp/')
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
-
-coadd_filenames = ['wp-pre-recon',
-                   'xi-smu-pre-recon-ar', 'xi-smu-pre-recon-nr',
-                   'xi_0-smu-pre-recon-ar', 'xi_0-smu-pre-recon-nr',
-                   'xi_2-smu-pre-recon-ar', 'xi_2-smu-pre-recon-nr',
-                   'wp-post-recon-std',
-                   'xi-smu-post-recon-std-ar', 'xi-smu-post-recon-std-nr',
-                   'xi_0-smu-post-recon-std-ar', 'xi_0-smu-post-recon-std-nr',
-                   'xi_2-smu-post-recon-std-ar', 'xi_2-smu-post-recon-std-nr']
 
 # # %% MP Class
 # class NoDaemonProcess(Process):
@@ -180,15 +171,19 @@ def rebin_smu_counts(cts):
         npairs[m, n] = arr['npairs'].sum()
         savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
         bins_included = bins_included + cts['npairs'][mask].size
-    print('Total DD fine bins: {}. Total bins included: {}'
-          .format(cts.size, bins_included))
-    print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
-          .format(cts['npairs'].sum(), npairs.sum()))
-    indices = np.where(npairs == 0)  # check if all bins are filled
-    if len(indices[0]) != 0:  # print problematic bins if any is empty
+    try:
+        assert cts.size == bins_included
+        assert cts['npairs'].sum() == npairs.sum()
+        indices = np.where(npairs == 0)
+        assert len(indices[0]) == 0
+    except AssertionError:
+        print('Total DD fine bins: {}. Total bins included: {}'
+              .format(cts.size, bins_included))
+        print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
+              .format(cts['npairs'].sum(), npairs.sum()))
         for i in range(len(indices[0])):
             print('({}, {}) bin is empty'.format(indices[0][i], indices[1][i]))
-
+        return False
     return npairs, savg
 
 
@@ -553,8 +548,8 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
     for i, j, k in product(range(N_sub), repeat=3):
-
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
+        print('r = {}, x-corr for subvolume {} ...'.format(model.r, linind))
         x2, y2, z2 = subvol_mask(gt['x'], gt['y'], gt['z'], i, j, k, L, N_sub)
         ND2 = x2.size  # number of galaxies in the subvolume
         DDnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
@@ -640,9 +635,184 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
                              ' shifted randoms for mode: {}'.format(mode))
 
 
+def do_realisation(r, model_name):
+
+    global halocat
+    try:  # this helps catch exception in a worker thread of multiprocessing
+        phase = halocat.ZD_Seed
+        sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+        recon_save_dir = os.path.join(save_dir, sim_name,
+                                      'z{}-r{}'.format(redshift, r))
+        gt_path = os.path.join(recon_save_dir, '{}-galaxy_table.csv'
+                               .format(model_name))
+        # all realisations in parallel, each model needs to be instantiated
+        model = initialise_model(halocat.redshift, model_name,
+                                 halo_m_prop=halo_m_prop)
+        model.N_cut = N_cut  # add useful model properties here
+        model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
+                store_dir, sim_name_prefix, 'c_median_poly.txt')))
+        model.r = r
+        # random seed using phase and realisation index r, model independent
+        seed = phase*100 + r
+        np.random.seed(seed)
+        print('r = {} for phase {}, model {} starting...'
+              .format(r, phase, model_name))
+        if reuse_galaxies:
+            gt_path_input = gt_path
+        else:
+            gt_path_input = None
+        model = populate_model(halocat, model, gt_path=gt_path_input,
+                               add_rsd=add_rsd, N_threads=N_threads)
+        gt = model.mock.galaxy_table
+        model.ND = len(gt)
+        # save galaxy table if it's not already loaded from disk
+        if save_hod_realisation and not model.mock.gt_loaded:
+            print('r = {}, saving galaxy table...'.format(r))
+            try:
+                os.makedirs(os.path.dirname(gt_path))
+            except OSError:
+                pass
+            gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
+        # save galaxy table metadata to sim directory, one file for each
+        # to be combined later to avoid threading conflicts
+        N_cen = np.sum(gt['gal_type'] == 'centrals')
+        N_sat = np.sum(gt['gal_type'] == 'satellites')
+        assert N_cen + N_sat == model.ND
+        gt_meta = table.Table(
+                [[model_name], [phase], [r], [seed],
+                 [N_cen], [N_sat], [model.ND]],
+                names=('model name', 'phase', 'realisation', 'seed',
+                       'N centrals', 'N satellites', 'N galaxies'),
+                dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+        if not os.path.exists(os.path.join(save_dir, 'galaxy_table_meta')):
+            os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
+        gt_meta.write(os.path.join(
+            save_dir, 'galaxy_table_meta',
+            '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
+            format='ascii.fast_csv', overwrite=True)
+
+        # pre-recon auto-corr with pair-counting, analytical
+        print('r = {}, now calculating pre-recon pair-counting...'.format(r))
+        do_auto_correlation(model, mode='smu-pre-recon',
+                            use_grid_randoms=False)
+        do_auto_correlation(model, mode='wp-pre-recon')
+        # do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
+        #                         use_grid_randoms=False)
+
+        # pre-reconstruction auto-correlation with FFTcorr
+        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
+        m = np.zeros(len(gt))
+        arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
+        arr.tofile(os.path.join(recon_temp_dir, 'gal_cat-{}.dat'.format(seed)),
+                   sep='')
+        subprocess.call(['python', './recon/read/read.py',
+                         str(phase), str(seed)])
+        subprocess.call(['python', './recon/reconstruct/reconst.py', '0',
+                         str(phase), str(seed), model_name, recon_save_dir])
+        # nr = np.float32(np.fromfile(
+        #         os.path.join(recon_temp_dir, 'file_R-{}'.format(seed)),
+        #         dtype=np.float64)[8:].reshape(-1, 4))
+
+        # standard reconstruction and calculate covariance w/ shifted randoms
+        print('r = {}, now calculating standard recon...'.format(r))
+        subprocess.call(['python', './recon/reconstruct/reconst.py', '1',
+                         str(phase), str(seed), model_name, recon_save_dir])
+        D = np.float32(np.fromfile(  # read shifted data
+                os.path.join(recon_temp_dir, 'file_D-{}_rec'.format(seed)),
+                dtype=np.float64)[8:].reshape(-1, 4))
+        R = np.float32(np.fromfile(  # read shifted randoms
+                os.path.join(recon_temp_dir, 'file_R-{}_rec'.format(seed)),
+                dtype=np.float64)[8:].reshape(-1, 4))
+        D[D < 0] += 1100  # undo wrapping by read.cpp for data_shifted
+        R[R < 0] += 1100  # read.cpp re-wraps data above 550 to negative pos
+        gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]  # changes model
+        indices = np.random.choice(R.shape[0], model.ND*random_multiplier,
+                                   replace=False)
+        model.mock.numerical_randoms = R[indices, :]  # resize random sample
+        # do_auto_correlation(model, mode='smu-post-recon-std',
+        #                     use_grid_randoms=False)
+        print('r = {}, now calculating x-corr covariance...'.format(r))
+        do_auto_correlation(model, mode='wp-post-recon-std')
+        do_subcross_correlation(model, N_sub=N_sub, mode='post-recon-std',
+                                use_grid_randoms=True)
+        # iterative reconstruction and assume the standard covariance above
+        print('r = {}, now calculating iterative recon...'.format(r))
+        subprocess.call(['python', './recon/reconstruct/reconst.py', '2',
+                         str(phase), str(seed), model_name, recon_save_dir])
+
+        print('Finished r = {}.'.format(r))
+    except Exception as E:
+        print('Exception caught in worker thread r = {}'.format(r))
+        traceback.print_exc()
+        raise E
+
+
+def do_realisations(halocat, model_name, phase, N_reals):
+
+    '''
+    generates n HOD realisations for a given (phase, model)
+    then co-add them and get a single set of xi data
+    the rest of the programme will work as if there is only 1 realisation
+    '''
+    # sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+    sim_name = halocat.header['SimName']
+    print('---\nWorking on {} realisations of {}, model {}...\n---\n'
+          .format(N_reals, sim_name, model_name))
+    # create n_real realisations of the given HOD model
+    with closing(Pool(processes=6, maxtasksperchild=1)) as p:
+        p.map(partial(do_realisation, model_name=model_name),
+              range(N_reals))
+    print('---\nPool closed cleanly for {} realisations of model {}.\n---'
+          .format(N_reals, model_name))
+
+
+coadd_filenames = [
+    'wp-pre-recon', 'xi-smu-pre-recon-ar',
+    'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
+    'fftcorr_N-pre-recon-15.0_hmpc', 'fftcorr_R-pre-recon-15.0_hmpc',
+    'wp-post-recon-std',
+    'fftcorr_N-post-recon-std-15.0_hmpc',
+    'fftcorr_R-post-recon-std-15.0_hmpc',
+    'fftcorr_N-post-recon-ite-15.0_hmpc',
+    'fftcorr_R-post-recon-ite-15.0_hmpc']
+#       'xi_0-smu-pre-recon-nr', 'xi_2-smu-pre-recon-nr',
+#       'xi-smu-post-recon-std-ar', 'xi-smu-post-recon-std-nr',
+#       'xi_0-smu-post-recon-std-ar', 'xi_0-smu-post-recon-std-nr',
+#       'xi_2-smu-post-recon-std-ar', 'xi_2-smu-post-recon-std-nr']
+
+
+def coadd_realisations(model_name, phase, N_reals):
+
+    # Co-add auto-correlation results from all realisations
+    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+    filedir = os.path.join(save_dir, sim_name, 'z{}'.format(redshift))
+    if not os.path.exists(filedir):
+        os.makedirs(filedir)
+    print('Coadding {} realisations for phase {}...'.format(N_reals, phase))
+    for fn in coadd_filenames:
+        temp = os.path.join(
+            save_dir, sim_name, 'z{}-r*'.format(redshift), '*'+fn+'*')
+        paths = glob(temp)
+        try:
+            assert len(paths) == N_reals
+        except AssertionError:
+            print('temp is:', temp)
+            print('paths are:', paths)
+            return False
+        corr_list = [np.loadtxt(path) for path in paths]
+        coadd, error = coadd_correlation(corr_list)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
+            coadd, fmt=txtfmt)
+        np.savetxt(os.path.join(
+                filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
+            error, fmt=txtfmt)
+
+
 def coadd_phases(model_name, coadd_phases=range(16)):
 
-    print('Coadding xi from all phases for model {}...'.format(model_name))
+    print('Coadding xi from {} phases for model {}...'
+          .format(len(coadd_phases), model_name))
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
@@ -652,11 +822,14 @@ def coadd_phases(model_name, coadd_phases=range(16)):
         temp = os.path.join(
             save_dir,
             '{}_{:02}-[0-9]*'.format(sim_name_prefix, cosmology),
-            'z{}'.format(redshift), '*'+fn+'*')
+            'z{}'.format(redshift), '*'+fn+'*coadd*')
         paths = glob(temp)
-        print('temp is:', temp)
-        print('paths are:', paths)
-        assert len(paths) == len(coadd_phases)
+        try:
+            assert len(paths) == len(coadd_phases)
+        except AssertionError:
+            print('temp is:', temp)
+            print('paths are:', paths)
+            return False
         corr_list = [np.loadtxt(path) for path in paths]
         coadd, error = coadd_correlation(corr_list)
         np.savetxt(os.path.join(
@@ -732,160 +905,6 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
                 .format(model_name, recon, rand))
         np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
         # print('Monoquad covariance matrix saved to: ', filepath)
-
-
-def do_realisation(r, model_name):
-
-    global halocat
-    try:  # this helps catch exception in a worker thread of multiprocessing
-        phase = halocat.ZD_Seed
-        sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-        recon_save_dir = os.path.join(save_dir, sim_name,
-                                      'z{}-r{}'.format(redshift, r))
-        gt_path = os.path.join(recon_save_dir, '{}-galaxy_table.csv'
-                               .format(model_name))
-        # all realisations in parallel, each model needs to be instantiated
-        model = initialise_model(halocat.redshift, model_name,
-                                 halo_m_prop=halo_m_prop)
-        model.N_cut = N_cut  # add useful model properties here
-        model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
-                store_dir, sim_name_prefix, 'c_median_poly.txt')))
-        model.r = r
-        # random seed using phase and realisation index r, model independent
-        seed = phase*100 + r
-        np.random.seed(seed)
-        print('r = {} for phase {}, model {} starting...'
-              .format(r, phase, model_name))
-        if reuse_galaxies:
-            gt_path_input = gt_path
-        else:
-            gt_path_input = None
-        model = populate_model(halocat, model, gt_path=gt_path_input,
-                               add_rsd=add_rsd, N_threads=N_threads)
-        gt = model.mock.galaxy_table
-        model.ND = len(gt)
-        # save galaxy table
-        if not reuse_galaxies and save_hod_realisation:
-            print('r = {}, saving galaxy table...'.format(r))
-            try:
-                os.makedirs(os.path.dirname(gt_path))
-            except OSError:
-                pass
-            gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
-        # save galaxy table metadata to sim directory, one file for each
-        # to be combined later to avoid threading conflicts
-        N_cen = np.sum(gt['gal_type'] == 'centrals')
-        N_sat = np.sum(gt['gal_type'] == 'satellites')
-        assert N_cen + N_sat == model.ND
-        gt_meta = table.Table(
-                [[model_name], [phase], [r], [seed],
-                 [N_cen], [N_sat], [model.ND]],
-                names=('model name', 'phase', 'realisation', 'seed',
-                       'N centrals', 'N satellites', 'N galaxies'),
-                dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-        if not os.path.exists(os.path.join(save_dir, 'galaxy_table_meta')):
-            os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
-        gt_meta.write(os.path.join(
-            save_dir, 'galaxy_table_meta',
-            '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
-            format='ascii.fast_csv', overwrite=True)
-
-        # pre-recon auto-corr with pair-counting, analytical
-        print('r = {}, now calculating pre-recon pair-counting...'.format(r))
-        do_auto_correlation(model, mode='smu-pre-recon',
-                            use_grid_randoms=False)
-        do_auto_correlation(model, mode='wp-pre-recon')
-        # do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
-        #                         use_grid_randoms=False)
-
-        # pre-reconstruction auto-correlation with FFTcorr
-        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
-        m = np.zeros(len(gt))
-        arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
-        arr.tofile(os.path.join(recon_temp_dir, 'gal_cat-{}.dat'.format(seed)),
-                   sep='')
-        subprocess.call(['python', './recon/read/read.py',
-                         str(phase), str(seed)])
-        subprocess.call(['python', './recon/reconstruct/reconst.py', '0',
-                         str(phase), str(seed), model_name, recon_save_dir])
-        # nr = np.float32(np.fromfile(
-        #         os.path.join(recon_temp_dir, 'file_R-{}'.format(seed)),
-        #         dtype=np.float64)[8:].reshape(-1, 4))
-
-        # standard reconstruction and calculate covariance w/ shifted randoms
-        print('r = {}, now calculating standard recon...'.format(r))
-        subprocess.call(['python', './recon/reconstruct/reconst.py', '1',
-                         str(phase), str(seed), model_name, recon_save_dir])
-        D = np.float32(np.fromfile(  # read shifted data
-                os.path.join(recon_temp_dir, 'file_D-{}_rec'.format(seed)),
-                dtype=np.float64)[8:].reshape(-1, 4))
-        R = np.float32(np.fromfile(  # read shifted randoms
-                os.path.join(recon_temp_dir, 'file_R-{}_rec'.format(seed)),
-                dtype=np.float64)[8:].reshape(-1, 4))
-        D[D < 0] += 1100  # undo wrapping by read.cpp for data_shifted
-        R[R < 0] += 1100  # read.cpp re-wraps data above 550 to negative pos
-        gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]  # changes model
-        indices = np.random.choice(R.shape[0], model.ND*random_multiplier,
-                                   replace=False)
-        model.mock.numerical_randoms = R[indices, :]  # resize random sample
-        # do_auto_correlation(model, mode='smu-post-recon-std',
-        #                     use_grid_randoms=False)
-        do_auto_correlation(model, mode='wp-post-recon-std')
-        do_subcross_correlation(model, N_sub=N_sub, mode='post-recon-std',
-                                use_grid_randoms=True)
-        # iterative reconstruction and assume the standard covariance above
-        subprocess.call(['python', './recon/reconstruct/reconst.py', '2',
-                         str(phase), str(seed), model_name, recon_save_dir])
-
-        print('Finished r = {}.'.format(r))
-    except Exception as E:
-        print('Exception caught in worker thread r = {}'.format(r))
-        traceback.print_exc()
-        raise E
-
-
-def do_realisations(halocat, model_name, phase, N_reals):
-
-    '''
-    generates n HOD realisations for a given (phase, model)
-    then co-add them and get a single set of xi data
-    the rest of the programme will work as if there is only 1 realisation
-    '''
-    # sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-    sim_name = halocat.header['SimName']
-    print('---\nWorking on {} realisations of {}, model {}...\n---\n'
-          .format(N_reals, sim_name, model_name))
-    # create n_real realisations of the given HOD model
-    with closing(Pool(processes=8, maxtasksperchild=1)) as p:
-        p.map(partial(do_realisation, model_name=model_name),
-              range(N_reals))
-    print('---\nPool closed cleanly for {} realisations of model {}.\n---'
-          .format(N_reals, model_name))
-
-
-def coadd_realisations(model_name, phase, N_reals):
-
-    # Co-add auto-correlation results from all realisations
-    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-    filedir = os.path.join(save_dir, sim_name, 'z{}'.format(redshift))
-    if not os.path.exists(filedir):
-        os.makedirs(filedir)
-    print('Coadding {} realisations for phase {}...'.format(N_reals, phase))
-    for fn in coadd_filenames:
-        temp = os.path.join(
-            save_dir, sim_name, 'z{}-r*'.format(redshift), '*'+fn+'*')
-        paths = glob(temp)
-        print('temp is:', temp)
-        print('paths are:', paths)
-        assert len(paths) == N_reals
-        corr_list = [np.loadtxt(path) for path in paths]
-        coadd, error = coadd_correlation(corr_list)
-        np.savetxt(os.path.join(
-                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
-            coadd, fmt=txtfmt)
-        np.savetxt(os.path.join(
-                filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
-            error, fmt=txtfmt)
 
 
 def combine_galaxy_table_metadata():
