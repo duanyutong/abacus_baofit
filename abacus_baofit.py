@@ -169,7 +169,7 @@ def rebin_smu_counts(cts):
         npairs[m, n] = arr['npairs'].sum()
         savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
         bins_included = bins_included + cts['npairs'][mask].size
-    indices = np.where(npairs == 0)
+
     try:
         assert cts.size == bins_included
         assert cts['npairs'].sum() == npairs.sum()
@@ -179,9 +179,11 @@ def rebin_smu_counts(cts):
         print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
               .format(cts['npairs'].sum(), npairs.sum()))
         raise E
-    if indices[0].size != 0:  # and np.any(indices[0] != 0):
-        for i in range(indices[0].size):
-            print('({}, {}) bin is empty'.format(indices[0][i], indices[1][i]))
+#    indices = np.where(npairs == 0)
+#    if indices[0].size != 0:  # and np.any(indices[0] != 0):
+#        for i in range(indices[0].size):
+#            print('({}, {}) bin is empty'
+#                  .format(indices[0][i], indices[1][i]))
     return npairs, savg
 
 
@@ -708,42 +710,47 @@ def do_realisation(r, model_name):
             save_dir, 'galaxy_table_meta',
             '{}-z{}-{}-r{}.csv'.format(model_name, redshift, phase, r)),
             format='ascii.fast_csv', overwrite=True)
-
-        # pre-recon auto-corr with pair-counting, analytical
-        print('r = {}, now calculating pre-recon pair-counting...'.format(r))
-        do_auto_correlation(model, mode='smu-pre-recon',
-                            use_grid_randoms=False)
-        do_auto_correlation(model, mode='wp-pre-recon')
-        # do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
-        #                         use_grid_randoms=False)
-
-        # pre-reconstruction auto-correlation with FFTcorr
-        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
+        # reconstruction prep work
         m = np.zeros(len(gt))
         arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
         arr.tofile(os.path.join(recon_temp_dir, 'gal_cat-{}.dat'.format(seed)),
                    sep='')
         subprocess.call(['python', './recon/read/read.py',
                          str(phase), str(seed)])
+        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
+
+        # pre-reconstruction auto-correlation with pair-counting, analytical
+        print('r = {}, now calculating pre-recon pair-counting...'.format(r))
+        do_auto_correlation(model, mode='smu-pre-recon',
+                            use_grid_randoms=False)
+        do_auto_correlation(model, mode='wp-pre-recon')
+        # do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
+        #                         use_grid_randoms=False)
+        # pre-reconstruction auto-correlation with FFTcorr
         subprocess.call(['python', './recon/reconstruct/reconst.py', '0',
                          str(phase), str(seed), model_name, recon_save_dir])
-        # nr = np.float32(np.fromfile(
-        #         os.path.join(recon_temp_dir, 'file_R-{}'.format(seed)),
-        #         dtype=np.float64)[8:].reshape(-1, 4))
-
-        # standard reconstruction and calculate covariance w/ shifted randoms
+        # standard reconstruction
         print('r = {}, now calculating standard recon...'.format(r))
         subprocess.call(['python', './recon/reconstruct/reconst.py', '1',
                          str(phase), str(seed), model_name, recon_save_dir])
+        # iterative reconstruction, reads original positions from .dat file
+        print('r = {}, now calculating iterative recon...'.format(r))
+        subprocess.call(['python', './recon/reconstruct/reconst.py', '2',
+                         str(phase), str(seed), model_name, recon_save_dir])
+
+        # calculate covariance w/ shifted randoms
+        print('r = {}, reading shifted samples for covariance...'.format(r))
         D = np.float32(np.fromfile(  # read shifted data
                 os.path.join(recon_temp_dir, 'file_D-{}_rec'.format(seed)),
                 dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
         R = np.float32(np.fromfile(  # read shifted randoms
                 os.path.join(recon_temp_dir, 'file_R-{}_rec'.format(seed)),
                 dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
+        print('r = {}, un-wrapping reconstructed samples...'.format(r))
         D[D < 0] += 1100  # undo wrapping by read.cpp for data_shifted
         R[R < 0] += 1100  # read.cpp re-wraps data above 550 to negative pos
-        gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]  # changes model
+        # write shifted positions to model galaxy table
+        gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]
         # randomly shuffle random sample along 1st dimension, reduce its size
         np.random.shuffle(R)
         model.mock.numerical_randoms = R[:model.ND*random_multiplier]
@@ -754,10 +761,6 @@ def do_realisation(r, model_name):
         print('r = {}, now calculating x-corr covariance...'.format(r))
         do_subcross_correlation(model, N_sub=N_sub, mode='smu-post-recon-std',
                                 use_grid_randoms=True)
-        # iterative reconstruction and assume the standard covariance above
-        print('r = {}, now calculating iterative recon...'.format(r))
-        subprocess.call(['python', './recon/reconstruct/reconst.py', '2',
-                         str(phase), str(seed), model_name, recon_save_dir])
         print('Finished r = {}.'.format(r))
     except Exception as E:
         print('Exception caught in worker thread r = {}'.format(r))
