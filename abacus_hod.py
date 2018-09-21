@@ -484,6 +484,7 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
             for pos in ['x', 'y', 'z']:
                 gt[pos] = gt[pos].astype(np.float32)
             model.mock.gt_loaded = True
+    model.mock.reconstructed = False
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))
     return model

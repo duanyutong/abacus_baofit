@@ -96,7 +96,7 @@ ite_weight_2 = 0.7     #  [2nd]   (next) = w1*(estimate) + (1-w1)*(previous)
 # last_sm = 10.0:  ite_times =  9, ite_weight_ini = ite_weight_2 = 0.5
 # last_sm = 15.0:  ite_times =  6, ite_weight_ini = ite_weight_2 = 0.7
 
-bias = 1.00            #  for matter field by default
+bias = 2.23            #  2.23 for galaxies, 1.0 for matter field by default
 bias_uncer = 0         #  uncertainty of bais 
                        #  -1 :   80 % 
                        #   0 :  100 %      
