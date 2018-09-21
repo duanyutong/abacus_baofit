@@ -32,7 +32,7 @@ from tqdm import tqdm
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'recon'  # 'z0.5'
-phases = [1]  # range(16)  # [0, 1] # list(range(16))
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -41,10 +41,10 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_s1', 'gen_sv1', 'gen_sp1',
                'gen_s1_n', 'gen_sv1_n', 'gen_sp1_n',
                'gen_vel1', 'gen_allbiases', 'gen_allbiases_n']
-model_names = ['gen_base1']
-N_reals = 1  # number of realisations for an HOD
+# model_names = ['gen_base1']
+N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 30  # for a single MP pool thread
+N_threads = 4  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
 random_multiplier = 10
 
@@ -56,12 +56,12 @@ add_rsd = True
 # %% bin settings
 step_s_bins = 5  # mpc/h, bins for fitting
 step_mu_bins = 0.01
-s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)  # for fitting
+s_bins = np.arange(0, 150 + step_s_bins, step_s_bins)
 s_bins_centre = (s_bins[:-1] + s_bins[1:]) / 2
 mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
 s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0  # for counting
-n_mu_bins = mu_bins.size-1  # for couting, mu bin width 0.01
+n_mu_bins = mu_bins.size-1
 pi_max = 150  # for counting
 rp_bins = s_bins
 
@@ -153,7 +153,7 @@ def rebin_smu_counts(cts):
     output npairs is a 2D histogram of dimensions
     n_s_bins by n_mu_bins matrix (30 by 20 by default)
     savg is the paircount-weighted average of s in the bin, same dimension
-
+    which may be inaccurate when bins are very fine and cmpty
     '''
 
     npairs = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.int64)
@@ -169,19 +169,19 @@ def rebin_smu_counts(cts):
         npairs[m, n] = arr['npairs'].sum()
         savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
         bins_included = bins_included + cts['npairs'][mask].size
+    indices = np.where(npairs == 0)
     try:
         assert cts.size == bins_included
         assert cts['npairs'].sum() == npairs.sum()
-        indices = np.where(npairs == 0)
-        assert len(indices[0]) == 0
-    except AssertionError:
-        print('Total DD fine bins: {}. Total bins included: {}'
+    except AssertionError as E:
+        print('Total fine bins: {}. Total bins included: {}'
               .format(cts.size, bins_included))
         print('Total npairs in fine bins: {}. Total npairs after rebinning: {}'
               .format(cts['npairs'].sum(), npairs.sum()))
-        for i in range(len(indices[0])):
+        raise E
+    if indices[0].size != 0:  # and np.any(indices[0] != 0):
+        for i in range(indices[0].size):
             print('({}, {}) bin is empty'.format(indices[0][i], indices[1][i]))
-        return False
     return npairs, savg
 
 
@@ -447,13 +447,13 @@ def do_auto_correlation(model, mode='smu-pre-recon',
                              '{}-auto-paircount-DD-{}.npy'
                              .format(model_name, mode)),
                 DDnpy)
-        DD_npairs, savg = rebin_smu_counts(DDnpy)  # re-count pairs in new bins
+        DD_npairs, _ = rebin_smu_counts(DDnpy)  # re-count pairs in new bins
         DD = DD_npairs / ND / ND  # normalised DD count
         np.savetxt(os.path.join(filedir, '{}-auto-paircount-DD-{}-rebinned.txt'
                                 .format(model_name, mode)),
                    DD, fmt=txtfmt)
-        # create r vector from weighted average of DD pair counts
-        savg_vec = s_bins_centre
+        # # create r vector from weighted average of DD pair counts
+        # savg_vec = s_bins_centre
         # savg_vec = np.sum(savg * DD, axis=1) / np.sum(DD, axis=1)
         DR_npairs, _, RR_npairs = analytic_random(
                 ND, NR, ND, NR, s_bins, mu_bins, Lbox.prod())
@@ -471,10 +471,10 @@ def do_auto_correlation(model, mode='smu-pre-recon',
         xi_s_mu = ls_estimator(DD, DR_ar, DR_ar, RR_ar)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
-        xi_0_txt = np.vstack([savg_vec, xi_0]).T
-        xi_2_txt = np.vstack([savg_vec, xi_2]).T
+        xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
+        xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
         for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                               ['xi_s_mu', 'xi_0', 'xi_2']):
+                               ['xi', 'xi_0', 'xi_2']):
             np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-ar.txt'
                                     .format(model_name, tag, mode)),
                        output, fmt=txtfmt)
@@ -512,8 +512,8 @@ def do_auto_correlation(model, mode='smu-pre-recon',
             xi_s_mu = ls_estimator(DD, DR_nr, DR_nr, RR_nr)
             xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
             xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
-            xi_0_txt = np.vstack([savg_vec, xi_0]).T
-            xi_2_txt = np.vstack([savg_vec, xi_2]).T
+            xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
+            xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
             np.savetxt(os.path.join(filedir,
                                     '{}-auto-paircount-DR-{}-nr_rebinned.txt'
                                     .format(model_name, mode)),
@@ -523,7 +523,7 @@ def do_auto_correlation(model, mode='smu-pre-recon',
                                     .format(model_name, mode)),
                        RR_nr, fmt=txtfmt)
             for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                                   ['xi_s_mu', 'xi_0', 'xi_2']):
+                                   ['xi', 'xi_0', 'xi_2']):
                 np.savetxt(os.path.join(filedir, '{}-auto-{}-{}-nr.txt'
                                         .format(model_name, tag, mode)),
                            output, fmt=txtfmt)
@@ -536,7 +536,7 @@ def do_auto_correlation(model, mode='smu-pre-recon',
                    wp_txt, fmt=txtfmt)
 
 
-def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
+def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
                             use_grid_randoms=False):
     '''
     cross-correlation between 1/N_sub^3 of a box and the whole box
@@ -553,7 +553,8 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
     # split the (already shuffled) randoms into N copies, each of size NData
-    nr_list = np.array_split(model.mock.numerical_randoms, random_multiplier)
+    Ncopies = int(random_multiplier/2)
+    nr_list = np.array_split(model.mock.numerical_randoms, Ncopies)
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
         print('r = {}, x-corr for subvolume {} ...'.format(model.r, linind))
@@ -578,7 +579,6 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
             xr1, yr1, zr1 = nr[:, 0], nr[:, 1], nr[:, 2]
             xr2, yr2, zr2 = subvol_mask(xr1, yr1, zr1, i, j, k, L, N_sub)
             NR1, NR2 = xr1.size, xr2.size
-            print('Doing DR and RD for R size {}'.format(NR1))
             DRnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
                           x1, y1, z1, X2=xr2, Y2=yr2, Z2=zr2,
                           periodic=True, verbose=False, output_savg=True,
@@ -592,7 +592,7 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
             DR = DR_npairs / ND1 / NR2
             RD = RD_npairs / NR1 / ND2
             RR_list = []
-            for n in range(random_multiplier):  # for each split copy of R
+            for n in range(Ncopies):  # for each split copy of R
                 nr = nr_list[n]  # this is one of the N copies from R split
                 xr1, yr1, zr1 = nr[:, 0], nr[:, 1], nr[:, 2]
                 xr2, yr2, zr2 = subvol_mask(xr1, yr1, zr1, i, j, k, L, N_sub)
@@ -603,7 +603,7 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
                               boxsize=L, c_api_timer=False)
                 RR_npairs, _ = rebin_smu_counts(RRnpy)
                 RR_list.append(RR_npairs / NR1 / NR2)
-            RR = np.mean(RR_list, axis=0)
+            RR = np.median(RR_list, axis=0)  # instead of mean to mitigate inf
             assert DD.shape == DR.shape == RD.shape == RR.shape
             for npy, txt, tag in zip([DRnpy, RDnpy, RRnpy],  # save counts
                                      [DR, RD, RR],
@@ -622,7 +622,7 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
             xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
             xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
             for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                                   ['xi_s_mu', 'xi_0', 'xi_2']):
+                                   ['xi', 'xi_0', 'xi_2']):
                 np.savetxt(os.path.join(
                         filedir, '{}-cross_{}-{}-{}-nr.txt'
                         .format(model_name, linind, tag, mode)),
@@ -643,7 +643,7 @@ def do_subcross_correlation(model, N_sub=3, mode='post-recon-std',
             xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
             xi_2_txt = np.vstack([s_bins_centre, xi_2]).T
             for output, tag in zip([xi_s_mu, xi_0_txt, xi_2_txt],
-                                   ['xi_s_mu', 'xi_0', 'xi_2']):
+                                   ['xi', 'xi_0', 'xi_2']):
                 np.savetxt(os.path.join(
                         filedir, '{}-cross_{}-{}-{}-ar.txt'
                         .format(model_name, linind, tag, mode)),
@@ -752,7 +752,7 @@ def do_realisation(r, model_name):
         #                     use_grid_randoms=False)
         do_auto_correlation(model, mode='wp-post-recon-std')
         print('r = {}, now calculating x-corr covariance...'.format(r))
-        do_subcross_correlation(model, N_sub=N_sub, mode='post-recon-std',
+        do_subcross_correlation(model, N_sub=N_sub, mode='smu-post-recon-std',
                                 use_grid_randoms=True)
         # iterative reconstruction and assume the standard covariance above
         print('r = {}, now calculating iterative recon...'.format(r))
