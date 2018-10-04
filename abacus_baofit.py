@@ -23,7 +23,7 @@ from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
 from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
 from Corrfunc.theory.wp import wp
-from abacus_hod import initialise_model, populate_model, vrange
+from abacus_hod import initialise_model, populate_model
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -41,10 +41,10 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_s1', 'gen_sv1', 'gen_sp1',
                'gen_s1_n', 'gen_sv1_n', 'gen_sp1_n',
                'gen_vel1', 'gen_allbiases', 'gen_allbiases_n']
-# model_names = ['gen_base1']
+# model_names = ['gen_base1', 'gen_base4']
 N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 4  # for a single MP pool thread
+N_threads = 8  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
 random_multiplier = 10
 
@@ -280,6 +280,30 @@ def find_repeated_entries(arr):
     return vals, idx_sort, idx_sort_split
 
 
+def vrange(starts, lengths):
+
+    '''Create concatenated ranges of integers for multiple start/stop
+    Input:
+        starts (1-D array_like): starts for each range
+        lengths (1-D array_like): lengths for each range (same shape as starts)
+    Returns:
+        numpy.ndarray: concatenated ranges
+
+    For example:
+        >>> starts = [1, 3, 4, 6]
+        >>> lengths = [0, 2, 3, 0]
+        >>> vrange(starts, lengths)
+        array([3, 4, 4, 5, 6])
+
+    '''
+    starts = np.asarray(starts).astype(np.int64)
+    lengths = np.asarray(lengths).astype(np.int64)
+    stops = starts + lengths
+    ret = (np.repeat(stops - lengths.cumsum(), lengths)
+           + np.arange(lengths.sum()))
+    return ret.astype(np.uint64)
+
+
 def sum_lengths(i, len_arr):
 
     return np.sum(len_arr[i])
@@ -320,7 +344,7 @@ def process_rockstar_halocat(halocat, N_cut):
     print('Re-arranging particle table...')
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
-    print('Rewriting halo_table subsample fields with MP...')
+    print('Rewriting halo_table subsample fields with multiprocessing...')
     # with closing(Pool(processes=16, maxtasksperchild=1)) as p:
     with closing(Pool(processes=N_threads)) as p:
         ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
@@ -338,13 +362,11 @@ def process_rockstar_halocat(halocat, N_cut):
             == len(ptab))
     halocat.halo_table = htab
     halocat.halo_ptcl_table = ptab
-
     print('Initial total N halos {}; mass cut mask count {}; '
           'subhalos cut mask count {}; final N halos {}. '
           'Smallest subsamp_len = {}.'
           .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab),
                   htab['halo_subsamp_len'].min()))
-
     return halocat
 
 
@@ -665,6 +687,18 @@ def do_realisation(r, model_name):
                                       'z{}-r{}'.format(redshift, r))
         gt_path = os.path.join(recon_save_dir, '{}-galaxy_table.csv'
                                .format(model_name))
+        # check if some important output files already exist
+        temp = os.path.join(recon_save_dir, model_name)
+        output_files = (
+            glob(temp + '-auto-fftcorr_N-post-recon*')          # 2
+            + glob(temp + '-auto-fftcorr_R-post-recon*')        # 2
+            + glob(temp + '-auto-xi_0-smu-pre-recon-ar*')       # 1
+            + glob(temp + '-cross_*-xi_0-smu-post-recon-std'))  # 27
+        if os.path.isfile(gt_path) and len(output_files) == 32:
+            print('r = {} key output files exist. Skipping...'.format(r))
+            return True
+        else:
+            print('Some output missing. Existing files: ', output_files)
         # all realisations in parallel, each model needs to be instantiated
         model = initialise_model(halocat.redshift, model_name,
                                  halo_m_prop=halo_m_prop)
@@ -780,13 +814,14 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    with closing(Pool(processes=6, maxtasksperchild=1)) as p:
+    with closing(Pool(processes=4, maxtasksperchild=1)) as p:
         p.map(partial(do_realisation, model_name=model_name),
               range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
           .format(N_reals, model_name))
 
 
+# coadd_realisations
 coadd_filenames = [
     'wp-pre-recon', 'xi-smu-pre-recon-ar',
     'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',

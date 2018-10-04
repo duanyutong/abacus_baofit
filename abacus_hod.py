@@ -23,30 +23,6 @@ from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
 
 
-def vrange(starts, lengths):
-
-    '''Create concatenated ranges of integers for multiple start/stop
-    Input:
-        starts (1-D array_like): starts for each range
-        lengths (1-D array_like): lengths for each range (same shape as starts)
-    Returns:
-        numpy.ndarray: concatenated ranges
-
-    For example:
-        >>> starts = [1, 3, 4, 6]
-        >>> lengths = [0, 2, 3, 0]
-        >>> vrange(starts, lengths)
-        array([3, 4, 4, 5, 6])
-
-    '''
-    starts = np.asarray(starts).astype(np.int64)
-    lengths = np.asarray(lengths).astype(np.int64)
-    stops = starts + lengths
-    ret = (np.repeat(stops - lengths.cumsum(), lengths)
-           + np.arange(lengths.sum()))
-    return ret.astype(np.uint64)
-
-
 def N_cen_mean(M, param_dict):
 
     # M. white 2011 parametrisation of zheng07. mass in Msun
