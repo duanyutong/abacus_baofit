@@ -693,12 +693,13 @@ def do_realisation(r, model_name):
             glob(temp + '-auto-fftcorr_N-post-recon*')          # 2
             + glob(temp + '-auto-fftcorr_R-post-recon*')        # 2
             + glob(temp + '-auto-xi_0-smu-pre-recon-ar*')       # 1
-            + glob(temp + '-cross_*-xi_0-smu-post-recon-std'))  # 27
+            + glob(temp + '-cross_*-xi_0-smu-post-recon-std*'))  # 27
         if os.path.isfile(gt_path) and len(output_files) == 32:
             print('r = {} key output files exist. Skipping...'.format(r))
             return True
         else:
-            print('Some output missing. Existing files: ', output_files)
+            print('Some output missing. {} existing files: {}'
+                  .foramt(len(output_files, output_files)))
         # all realisations in parallel, each model needs to be instantiated
         model = initialise_model(halocat.redshift, model_name,
                                  halo_m_prop=halo_m_prop)
@@ -846,14 +847,16 @@ def coadd_realisations(model_name, phase, N_reals):
         os.makedirs(filedir)
     print('Coadding {} realisations for phase {}...'.format(N_reals, phase))
     for fn in coadd_filenames:
-        temp = os.path.join(
-            save_dir, sim_name, 'z{}-r*'.format(redshift), '*'+fn+'*')
+        print('Coadding', fn)
+        temp = os.path.join(save_dir, sim_name, 'z{}-r*'.format(redshift),
+                            model_name+'*'+fn+'*')
         paths = glob(temp)
         try:
             assert len(paths) == N_reals
         except AssertionError:
-            print('temp is:', temp)
-            print('paths are:', paths)
+            print('Number of files to be co-added does not equal to N_reals. '
+                  'Glob template is: ', temp)
+            print('Paths found:', paths)
             return False
         corr_list = [np.loadtxt(path) for path in paths]
         coadd, error = coadd_correlation(corr_list)
