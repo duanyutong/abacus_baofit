@@ -803,7 +803,9 @@ def combine_galaxy_table_metadata():
     if not np.all(exist):  # at least one path does not exist, print it
         raise NameError('Galaxy table metadata incomplete. Missing:\n{}'
                         .format(np.array(paths)[~np.where(exist)]))
-    tables = [table.Table.read(path, format='fast_csv')
+    tables = [table.Table.read(
+                path, format='fast_csv',
+                fast_reader={'parallel': True, 'use_fast_converter': False})
               for path in tqdm(paths)]
     gt_meta = table.vstack(tables)
     gt_meta.write(os.path.join(save_dir, 'galaxy_table_meta.csv'),

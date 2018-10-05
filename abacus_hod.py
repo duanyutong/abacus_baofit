@@ -20,7 +20,6 @@ import os
 from multiprocessing import Pool
 from functools import partial
 import numpy as np
-# from multiprocessing import Pool
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
@@ -673,11 +672,11 @@ def make_galaxies(model, add_rsd=True):
     '''
     # if we add assembly bias, re-rank halos using pseudomass
     halo_m = ht[model.halo_m_prop].data
-    c_median = model.c_median_poly(np.log10(halo_m))
-    delta_c = ht['halo_nfw_conc'] - c_median
     A_cen = model.param_dict['A_cen']
     if A_cen != 0:
         print('Adding assembly bias for centrals...')
+        c_median = model.c_median_poly(np.log10(halo_m))
+        delta_c = ht['halo_nfw_conc'] - c_median
         halo_pseudomass_cen = np.int64(
                 halo_m * np.exp(A_cen*(2*(delta_c > 0) - 1)))
         ind_m = halo_m.argsort()
