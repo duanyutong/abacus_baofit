@@ -15,12 +15,194 @@ halo/galaxy/particle tables have the following default units:
 
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
+from contextlib import closing
 import os
+from multiprocessing import Pool
+from functools import partial
 import numpy as np
 # from multiprocessing import Pool
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
+import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+import matplotlib.pyplot as plt
+# plt.switch_backend('Agg')  # switch this on if backend error is reported
+
+
+def sum_lengths(i, len_arr):
+
+    return np.sum(len_arr[i])
+
+
+def vrange(starts, lengths):
+
+    '''Create concatenated ranges of integers for multiple start/stop
+    Input:
+        starts (1-D array_like): starts for each range
+        lengths (1-D array_like): lengths for each range (same shape as starts)
+    Returns:
+        numpy.ndarray: concatenated ranges
+
+    For example:
+        >>> starts = [1, 3, 4, 6]
+        >>> lengths = [0, 2, 3, 0]
+        >>> vrange(starts, lengths)
+        array([3, 4, 4, 5, 6])
+
+    '''
+    starts = np.asarray(starts).astype(np.int64)
+    lengths = np.asarray(lengths).astype(np.int64)
+    stops = starts + lengths
+    ret = (np.repeat(stops - lengths.cumsum(), lengths)
+           + np.arange(lengths.sum()))
+    return ret.astype(np.uint64)
+
+
+def find_repeated_entries(arr):
+
+    '''
+    arr = array([1, 2, 3, 1, 1, 3, 4, 3, 2])
+    idx_sort_split =
+        [array([0, 3, 4]), array([1, 8]), array([2, 5, 7]), array([6])]
+    '''
+
+    idx_sort = np.argsort(arr)  # just the argsort
+    sorted_arr = arr[idx_sort]
+    vals, idx_start = np.unique(sorted_arr, return_index=True,
+                                return_counts=False)
+    # split as sets of indices
+    idx_sort_split = np.split(idx_sort, idx_start[1:])
+    # filter w.r.t their size, keeping only items occurring more than once
+    # vals = vals[count > 1]
+    # ret = filter(lambda x: x.size > 1, res)
+    return vals, idx_sort, idx_sort_split
+
+
+def process_rockstar_halocat(halocat, N_cut=70):
+
+    '''
+    In Rockstar halo catalogues, the subhalo particles are not included in the
+    host halo subsample indices in halo_table. This function applies mass
+    cut (70 particles in AbacusCosmos corresponds to 4e12 Msun), gets rid of
+    all subhalos, and puts all subhalo particles together with their host halo
+    particles in halo_ptcl_table.
+
+    Output halocat has halo_table containing only halos (not subhalos) meeting
+    the masscut, and halo_ptcl_table containing all particles belonging to the
+    halos selected in contiguous blocks. Also we force subsamp_len > 0 so that
+    halo contains at least one subsample particle.
+
+    '''
+
+    print('Applying mass cut N = {} to halocat and re-organising subsamples...'
+          .format(N_cut))
+    N0 = len(halocat.halo_table)
+    mask_halo = ((halocat.halo_table['halo_upid'] == -1)  # only host halos
+                 & (halocat.halo_table['halo_N'] >= N_cut))
+    #             & (halocat.halo_table['halo_subsamp_len'] > 0))
+    mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)  # child subhalos
+                    & np.isin(
+                            halocat.halo_table['halo_upid'],
+                            halocat.halo_table['halo_id'][mask_halo]))
+    htab = halocat.halo_table[mask_halo | mask_subhalo]  # original order
+    print('Locating relevant halo host ids in halo table...')
+    hostids, hidx, hidx_split = find_repeated_entries(htab['halo_hostid'].data)
+    print('Creating subsample particle indices...')
+    pidx = vrange(htab['halo_subsamp_start'][hidx].data,
+                  htab['halo_subsamp_len'][hidx].data)
+    print('Re-arranging particle table...')
+    ptab = halocat.halo_ptcl_table[pidx]
+    # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
+    print('Rewriting halo_table subsample fields with multiprocessing...')
+    # with closing(Pool(processes=16, maxtasksperchild=1)) as p:
+    with closing(Pool()) as p:
+        ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
+                       hidx_split)
+    p.close()
+    p.join()
+    htab = htab[htab['halo_upid'] == -1]  # drop subhalos now that ptcl r done
+    assert len(htab) == len(hostids)  # sanity check, hostids are unique values
+    htab = htab[htab['halo_hostid'].data.argsort()]
+    htab['halo_subsamp_len'] = ss_len  # overwrite halo_subsamp_len field
+    assert np.sum(htab['halo_subsamp_len']) == len(ptab)
+    htab['halo_subsamp_start'][0] = 0  # reindex halo_subsamp_start
+    htab['halo_subsamp_start'][1:] = htab['halo_subsamp_len'].cumsum()[:-1]
+    assert (htab['halo_subsamp_start'][-1] + htab['halo_subsamp_len'][-1]
+            == len(ptab))
+    halocat.halo_table = htab
+    halocat.halo_ptcl_table = ptab
+    print('Initial total N halos {}; mass cut mask count {}; '
+          'subhalos cut mask count {}; final N halos {}. '
+          'Smallest subsamp_len = {}.'
+          .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab),
+                  htab['halo_subsamp_len'].min()))
+
+
+def fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
+                 halo_type='Rockstar', N_cut=70, phases=range(16)):
+
+    '''
+    median concentration as a function of log halo mass in Msun/h
+    c_med(log(m)) = poly(log(m))
+
+    '''
+    # check if output file already exists
+    poly_path = os.path.join(store_dir, sim_name_prefix, 'c_median_poly')
+    if os.path.isfile(poly_path):
+        return None
+    # load 16 phases for the given cosmology and redshift
+    print('Loading halo catalogues to fit c_median...')
+    halocats = abacus_ht.make_catalogs(
+        sim_name=sim_name_prefix, products_dir=prod_dir,
+        redshifts=[redshift], cosmologies=[cosmology], phases=phases,
+        halo_type=halo_type,
+        load_halo_ptcl_catalog=True,  # this loads 10% particle subsamples
+        load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
+        load_pids='auto')[0][0]
+    htabs = [halocat.halo_table for halocat in halocats]
+    htab = table.vstack(htabs)  # combine all phases into one halo table
+    mask = (htab['halo_N'] >= N_cut) & (htab['halo_upid'] == -1)
+    htab = htab[mask]   # mass cut
+    halo_logm = np.log10(htab['halo_mvir'].data)
+    halo_nfw_conc = htab['halo_rvir'].data / htab['halo_klypin_rs'].data
+    # set up bin edges, the last edge larger than the most massive halo
+    logm_bins = np.linspace(np.min(halo_logm), np.max(halo_logm)+0.001,
+                            endpoint=True, num=100)
+    logm_bins_centre = (logm_bins[:-1] + logm_bins[1:]) / 2
+    N_halos, _ = np.histogram(halo_logm, bins=logm_bins)
+    c_median = np.zeros(len(logm_bins_centre))
+    c_median_std = np.zeros(len(logm_bins_centre))
+    for i in range(len(logm_bins_centre)):
+        mask = (logm_bins[i] <= halo_logm) & (halo_logm < logm_bins[i+1])
+        c_median[i] = np.median(halo_nfw_conc[mask])
+        c_median_std[i] = np.std(halo_nfw_conc[mask])
+    # when there is 0 data point in bin, median = std = nan, remove
+    # when there is only 1 data point in bin, std = 0 and w = inf
+    # when there are few data points, std very small (<1), w large
+    # rescale weight by sqrt(N-1)
+    mask = c_median_std > 0
+    N_halos, logm_bins_centre, c_median, c_median_std = \
+        N_halos[mask], logm_bins_centre[mask], \
+        c_median[mask], c_median_std[mask]
+    weights = 1/np.array(c_median_std)*np.sqrt(N_halos-1)
+    coefficients = np.polyfit(logm_bins_centre, c_median, 3, w=weights)
+    print('Polynomial found as : {}.'.format(coefficients))
+    # save coefficients to txt file
+    if not os.path.exists(os.path.dirname(poly_path)):
+        os.makedirs(os.path.dirname(poly_path))
+    np.savetxt(poly_path + '.txt',
+               coefficients, fmt=b'%.30e')
+    c_median_poly = np.poly1d(coefficients)
+    # plot fit
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.errorbar(logm_bins_centre, c_median, yerr=c_median_std,
+                capsize=3, capthick=0.5, fmt='.', ms=4, lw=0.2)
+    ax.plot(logm_bins_centre, c_median_poly(logm_bins_centre), '-')
+    ax.set_title('Median Concentration Polynomial Fit from {} Boxes'
+                 .format(len(phases)))
+    fig.savefig(poly_path + '.pdf')
+
+    return c_median_poly
 
 
 def N_cen_mean(M, param_dict):
@@ -421,7 +603,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
+def populate_model(halocat, model, gt_path=None, add_rsd=True):
 
     # use halotools HOD
     if model.model_type == 'prebuilt':
@@ -438,6 +620,9 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
         model.mock.gt_loaded = False
     # use particle-based HOD
     elif model.model_type == 'general':
+        # random seed using phase and realisation index r, model independent
+        seed = halocat.ZD_Seed * 100 + model.r
+        np.random.seed(seed)  # set random generator deterministically
         if hasattr(model, 'mock'):
             # attribute mock present, at least second realisation
             pass
@@ -450,23 +635,30 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True, N_threads=10):
             model.mock.halo_ptcl_table = halocat.halo_ptcl_table
         if gt_path is None or not os.path.exists(gt_path):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
-            print('Populating {} halos, r = {}...'
+            print('r = {}, populating {} halos, ...'
                   .format(len(model.mock.halo_table), model.r))
-            model = make_galaxies(model, add_rsd=add_rsd, N_threads=N_threads)
+            model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
-            print('Loading existing galaxy table: {}'.format(gt_path))
-            model.mock.galaxy_table = gt = table.Table.read(gt_path)
+            print('r = {}, loading existing galaxy table: {}'.format(gt_path))
+            model.mock.galaxy_table = gt = table.Table.read(
+                gt_path, format='fast_csv',
+                fast_reader={'parallel': True, 'use_fast_converter': False})
             for pos in ['x', 'y', 'z']:
                 gt[pos] = gt[pos].astype(np.float32)
             model.mock.gt_loaded = True
     model.mock.reconstructed = False
+    model.mock.ND = len(model.mock.galaxy_table)
     print('Mock catalogue populated with {} galaxies'
           .format(len(model.mock.galaxy_table)))
     return model
 
 
-def make_galaxies(model, add_rsd=True, N_threads=10):
+def make_galaxies(model, add_rsd=True):
+
+    '''
+    add_rsd modifies z coordiante of halos which do host central galaxies
+    '''
 
     h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
     ht = model.mock.halo_table

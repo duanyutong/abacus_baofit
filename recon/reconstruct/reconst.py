@@ -16,10 +16,10 @@ import subprocess, os
 
 # input arguments
 reconst = sys.argv[1]
-phase = sys.argv[2]
-tag = sys.argv[3]
-model_name = sys.argv[4]
-save_dir = sys.argv[5]
+# phase = sys.argv[2]
+tag = sys.argv[2]
+model_name = sys.argv[3]
+save_dir = sys.argv[4]
 # inp_make = ""
 # inp_run = "y"
 
@@ -389,6 +389,7 @@ OPTIONS = ["-ngrid", str(ngridCube), \
            ]
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 cmd_run = ["./reconst_" + reconst] + OPTIONS
+# print('Reconstruction command:', cmd_run)
 # print(' '.join(cmd_run))
 # if (not inp_make and inp_run):
 subprocess.call(cmd_run)
