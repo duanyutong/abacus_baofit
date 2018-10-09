@@ -147,7 +147,7 @@ def fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
     '''
     # check if output file already exists
     poly_path = os.path.join(store_dir, sim_name_prefix, 'c_median_poly')
-    if os.path.isfile(poly_path):
+    if os.path.isfile(poly_path+'.txt'):
         return None
     # load 16 phases for the given cosmology and redshift
     print('Loading halo catalogues to fit c_median...')
@@ -635,7 +635,7 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True):
         if gt_path is None or not os.path.exists(gt_path):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
             print('r = {}, populating {} halos, ...'
-                  .format(len(model.mock.halo_table), model.r))
+                  .format(model.r, len(model.mock.halo_table)))
             model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
@@ -665,23 +665,24 @@ def make_galaxies(model, add_rsd=True):
     # remove existing galaxy table, because modifying it is too painfully slow
     if hasattr(model.mock, 'galaxy_table'):
         del model.mock.galaxy_table
-
+    halo_m = ht[model.halo_m_prop].data  # original halo mass
+    A_cen = model.param_dict['A_cen']
+    A_sat = model.param_dict['A_sat']
+    if A_cen != 0 or A_sat != 0:    # calculate delta c with original mass
+        c_median = model.c_median_poly(np.log10(halo_m))
+        delta_c = ht['halo_nfw_conc'] - c_median
     '''
     centrals
 
     '''
     # if we add assembly bias, re-rank halos using pseudomass
-    halo_m = ht[model.halo_m_prop].data
-    A_cen = model.param_dict['A_cen']
     if A_cen != 0:
         print('Adding assembly bias for centrals...')
-        c_median = model.c_median_poly(np.log10(halo_m))
-        delta_c = ht['halo_nfw_conc'] - c_median
         halo_pseudomass_cen = np.int64(
                 halo_m * np.exp(A_cen*(2*(delta_c > 0) - 1)))
         ind_m = halo_m.argsort()
         ind_pm = halo_pseudomass_cen.argsort().argsort()
-        halo_m = halo_m[ind_m][ind_pm]
+        halo_m = halo_m[ind_m][ind_pm]  # assign pseudomass to halo mass
     # calculate N_cen_mean using given model for all halos
     ht['N_cen_model'] = N_cen_mean(halo_m / h, model.param_dict)
     # create N_halos random numbers in half-open interval [0. 1) for centrals
@@ -727,8 +728,7 @@ def make_galaxies(model, add_rsd=True):
 
     '''
     # before decorations, N_sat only depend on halo mass
-    halo_m = ht[model.halo_m_prop].data
-    A_sat = model.param_dict['A_sat']
+    halo_m = ht[model.halo_m_prop].data  # reset halo mass to original values
     if A_sat != 0:
         halo_pseudomass_sat = np.int64(
                 halo_m * np.exp(A_sat*(2*(delta_c > 0) - 1)))

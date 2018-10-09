@@ -32,7 +32,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'recon'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(7, 16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -45,7 +45,7 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_ass1', 'gen_ass2', 'gen_ass3']
 N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_threads = 8  # for a single MP pool thread
+N_threads = 10  # for a single MP pool thread
 N_sub = 3  # number of subvolumes per dimension
 random_multiplier = 10
 
@@ -518,7 +518,7 @@ def do_realisation(r, model_name):
             return True
         else:
             print('r = {} incomplete, {} out of 33 key output files present.'
-                  .format(len(output_files)))
+                  .format(r, len(output_files)))
         # all realisations in parallel, each model needs to be instantiated
         model = initialise_model(halocat.redshift, model_name,
                                  halo_m_prop=halo_m_prop)
@@ -536,7 +536,7 @@ def do_realisation(r, model_name):
         else:
             gt_path_input = None
         model = populate_model(halocat, model, gt_path=gt_path_input,
-                               add_rsd=add_rsd, N_threads=N_threads)
+                               add_rsd=add_rsd)
         gt = model.mock.galaxy_table
         # save galaxy table if it's not already loaded from disk
         if save_hod_realisation and not model.mock.gt_loaded:
@@ -639,7 +639,7 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    with closing(Pool(processes=4, maxtasksperchild=1)) as p:
+    with closing(Pool(processes=3, maxtasksperchild=1)) as p:
         p.map(partial(do_realisation, model_name=model_name),
               range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
