@@ -721,7 +721,7 @@ def make_galaxies(model, add_rsd=True):
     # combine inherited fields and new field(s)
     gt_cen = table.hstack([gt_inh, gt_new], join_type='exact')
     gt_cen['gal_type'] = 'centrals'
-    print('{} centrals generated.'.format(len(gt_cen)))
+    print('r = {}, {} centrals generated.'.format(model.r, len(gt_cen)))
 
     '''
     satellites
@@ -741,7 +741,7 @@ def make_galaxies(model, add_rsd=True):
     ht['N_sat_model'][mask] /= ht['halo_subsamp_len'][mask]
     # # fix inf due to dividing by zero
     # ht['N_sat_model'][ht['halo_subsamp_len'] == 0] = 0
-    print('Creating inherited halo properties for centrals, r = {}...'
+    print('r = {}, creating inherited halo properties for centrals...'
           .format(model.r))
     pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_particles = len(pt)
@@ -757,7 +757,7 @@ def make_galaxies(model, add_rsd=True):
         # numpy bug, cannot cast uint64 to int64 for repeat
         pt[col] = np.repeat(ht[col], ht['halo_subsamp_len'].astype(np.int64))
     # calculate additional particle quantities for decorations
-    print('Processing particle table properties for r = {}...'.format(model.r))
+    print('r = {}, processing particle table properties...'.format(model.r))
     process_particle_props(pt, h, halo_m_prop=model.halo_m_prop)
     # particle table complete. onto satellite generation
     # calculate satellite probablity and generate random numbers
@@ -791,7 +791,7 @@ def make_galaxies(model, add_rsd=True):
     #                                   ht['halo_subsamp_start'].data[1:])
     #     print('Calculating perihelion distance rankings with MP...')
     #     pt['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
-    print('Ranking particles within each halo for r = {} ...'.format(model.r))
+    print('r = {}, ranking particles within each halo for...'.format(model.r))
     for i in range(N_halos):
         m = ht['halo_subsamp_start'][i]
         n = ht['halo_subsamp_len'][i]
@@ -824,7 +824,7 @@ def make_galaxies(model, add_rsd=True):
                    model.mock.BoxSize/h) * h  # in Mpc/h
     else:
         z = pt['z'][mask_sat]
-    print('Creating inherited halo properties for satellites, r = {}...'
+    print('r = {}, creating inherited halo properties for satellites...'
           .format(model.r))
     # satellite calculation done, create satellites table
     # create galaxy_table columns to be inherited from particle table
@@ -848,7 +848,7 @@ def make_galaxies(model, add_rsd=True):
     # combine inherited fields and new field(s)
     gt_sat = table.hstack([gt_inh, gt_new], join_type='exact')
     gt_sat['gal_type'] = 'satellites'
-    print('{} satellites generated.'.format(len(gt_sat)))
+    print('r = {}, {} satellites generated.'.format(model.r, len(gt_sat)))
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],
                                            join_type='outer')
