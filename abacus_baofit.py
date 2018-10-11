@@ -214,7 +214,7 @@ def coadd_correlation(corr_list):
 
     '''
     arr = np.array(corr_list)
-    coadd = np.mean(arr, axis=0)
+    coadd = np.median(arr, axis=0)
     err = np.std(arr, axis=0)
     if arr.shape[2] == 2:
         # each input array in list is of shape (:, 2), and 1st column is r
@@ -535,8 +535,8 @@ def do_realisation(r, model_name):
             gt_path_input = gt_path
         else:
             gt_path_input = None
-        model = populate_model(halocat, model, gt_path=gt_path_input,
-                               add_rsd=add_rsd)
+        model = populate_model(halocat, model,
+                               gt_path=gt_path_input, add_rsd=add_rsd)
         gt = model.mock.galaxy_table
         # save galaxy table if it's not already loaded from disk
         if save_hod_realisation and not model.mock.gt_loaded:
@@ -570,8 +570,6 @@ def do_realisation(r, model_name):
                    sep='')
         subprocess.call(['python', './recon/read/read.py',
                          str(phase), str(seed)])
-        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
-
         # pre-reconstruction auto-correlation with pair-counting, analytical
         print('r = {}, now calculating pre-recon pair-counting...'.format(r))
         do_auto_correlation(model, mode='smu-pre-recon',
@@ -580,6 +578,7 @@ def do_realisation(r, model_name):
         # do_subcross_correlation(model, N_sub=N_sub, mode='pre-recon',
         #                         use_grid_randoms=False)
         # pre-reconstruction auto-correlation with FFTcorr
+        print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
         subprocess.call(['python', './recon/reconstruct/reconst.py',
                          '0', str(seed), model_name, recon_save_dir])
         # standard reconstruction

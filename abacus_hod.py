@@ -394,18 +394,19 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     distribution of satellite galaxies within halos deviate from the radial
     profile of the halo. Positive value favors satellite galaxies to populate
     the outskirts of the halo whereas negative value favors satellite galaxy
-    to live near the center of the halo.
+    to live near the center of the halo. |s| must be < 1.
 
     s_v : float. The satellite velocity bias parameter. Modulates how the
     satellite galaxy peculiar velocity deviates from that of the local dark
     matter particle. Positive value favors high peculiar velocity satellite
     galaxies and vice versa. Note that our implementation preserves the
-    Newton's second law of the satellite galaxies.
+    Newton's second law of the satellite galaxies. |s| must be < 1.
 
     s_p : float. The perihelion distance modulation parameter. A positive
     value favors satellite galaxies to have larger distances to the halo
     center upon their closest approach to the center and vice versa. This can
     be regarded as a "fancier" satellite profile modulation parameter.
+    |s| must be < 1.
 
     A : float. The assembly bias parameter. Introduces the effect of assembly
     bias. A positive value favors higher concentration halos to host galaxies
@@ -420,6 +421,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     # print('Initialising HOD model: {}...'.format(model_name))
 
     # halotools prebiult models
+    model_type = 'prebuilt'
     if model_name == 'zheng07':
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=redshift,
@@ -514,6 +516,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
 
     # generalised HOD models with 5-parameter zheng07 as base model
     else:  # 'gen_base1'
+        model_type = 'general'
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=redshift,
                                         threshold=-18,
@@ -531,8 +534,10 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         model.param_dict['alpha_c'] = 0  # centrals velocity bias
         model.param_dict['A_cen'] = 0  # centrals assembly bias, pseudomass
         model.param_dict['A_sat'] = 0  # satellites assembly bias, pseudomass
-        ''' BOOKKEEPING: DONT MODIFY EXISTING MODELS, CREATE NEW ONES '''
-        if model_name == 'gen_base2':
+
+        ''' BOOKKEEPING: DO NOT MODIFY EXISTING MODELS, CREATE NEW ONES '''
+
+        if model_name == 'gen_base2':  # params are tweaked to produce same ND
             model.param_dict['logM1'] = 13.85
             model.param_dict['alpha'] = 1.377
         elif model_name == 'gen_base3':
@@ -565,38 +570,35 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         elif model_name == 'gen_vel1':
             model.param_dict['alpha_c'] = 1
         elif model_name == 'gen_s1':
-            model.param_dict['s'] = 1
+            model.param_dict['s'] = 0.9
         elif model_name == 'gen_sv1':
-            model.param_dict['s_v'] = 1
+            model.param_dict['s_v'] = 0.9
         elif model_name == 'gen_sp1':
-            model.param_dict['s_p'] = 1
+            model.param_dict['s_p'] = 0.9
         elif model_name == 'gen_s1_n':
-            model.param_dict['s'] = -1
+            model.param_dict['s'] = -0.9
         elif model_name == 'gen_sv1_n':
-            model.param_dict['s_v'] = -1
+            model.param_dict['s_v'] = -0.9
         elif model_name == 'gen_sp1_n':
-            model.param_dict['s_p'] = -1
+            model.param_dict['s_p'] = -0.9
         elif model_name == 'gen_allbiases':
             model.param_dict['A_cen'] = 1
             model.param_dict['A_sat'] = 1
             model.param_dict['alpha_c'] = 1
-            model.param_dict['s'] = 1
-            model.param_dict['s_v'] = 1
-            model.param_dict['s_p'] = 1
+            model.param_dict['s'] = 0.9
+            model.param_dict['s_v'] = 0.9
+            model.param_dict['s_p'] = 0.9
         elif model_name == 'gen_allbiases_n':
             model.param_dict['A_cen'] = -1
             model.param_dict['A_sat'] = -1
             model.param_dict['alpha_c'] = 1
-            model.param_dict['s'] = -1
-            model.param_dict['s_v'] = -1
-            model.param_dict['s_p'] = -1
+            model.param_dict['s'] = -0.9
+            model.param_dict['s_v'] = -0.9
+            model.param_dict['s_p'] = -0.9
 
     # add useful model properties here
     model.model_name = model_name
-    if 'gen' in model_name:
-        model.model_type = 'general'
-    else:
-        model.model_type = 'prebuilt'
+    model.model_type = model_type
     model.halo_m_prop = halo_m_prop
 
     return model
