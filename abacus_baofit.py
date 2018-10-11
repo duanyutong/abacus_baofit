@@ -168,7 +168,10 @@ def rebin_smu_counts(cts):
             (mu_bins[n] < cts['mu_max']) & (cts['mu_max'] <= mu_bins[n+1]))
         arr = cts[mask]
         npairs[m, n] = arr['npairs'].sum()
-        savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
+        if npairs[m, n] == 0:
+            savg[m, n] = (s_bins[m] + s_bins[m+1]) / 2
+        else:
+            savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
         bins_included = bins_included + cts['npairs'][mask].size
 
     try:
@@ -195,16 +198,6 @@ def subvol_mask(x, y, z, i, j, k, L, N_sub):
             (L_sub * j < y) & (y <= L_sub * (j+1)) &
             (L_sub * k < z) & (z <= L_sub * (k+1)))
     return x[mask], y[mask], z[mask]
-
-
-def xi1d_list_to_cov(xi_list):
-    '''
-    rows are bins and columns are sample values for each bin
-    '''
-
-    print('Calculating covariance matrix from {} xi multipole matrices...'
-          .format(len(xi_list)))
-    return np.cov(np.array(xi_list).T, bias=0)
 
 
 def coadd_correlation(corr_list):
@@ -447,7 +440,8 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
                               boxsize=L, c_api_timer=False)
                 RR_npairs, _ = rebin_smu_counts(RRnpy)
                 RR_list.append(RR_npairs / NR1 / NR2)
-            RR = np.median(RR_list, axis=0)  # instead of mean to mitigate inf
+            RR = np.median(RR_list, axis=0)  # could be co-adding zeros
+            # RR[RR == 0] = np.nan  # if end up with 0, replace with nan
             assert DD.shape == DR.shape == RD.shape == RR.shape
             for npy, txt, tag in zip([DRnpy, RDnpy, RRnpy],  # save counts
                                      [DR, RD, RR],
@@ -460,7 +454,7 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
                         filedir, '{}-cross_{}-paircount-{}-{}-nr_rebinned.txt'
                         .format(model_name, linind, tag, mode)),
                     txt, fmt=txtfmt)
-            xi_s_mu = ls_estimator(DD, DR, RD, RR)
+            xi_s_mu = ls_estimator(DD, DR, RD, RR)  # divide by 0 when RR=0
             xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
             xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
             xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
@@ -735,7 +729,6 @@ def coadd_phases(model_name, coadd_phases=range(16)):
 
 def do_cov(model_name, N_sub=3, cov_phases=range(16)):
 
-    # # calculate cov combining all phases, 16 * N_sub^3 * N_reals
     # for ell in [0, 2]:
     #     paths = []
     #     for phase in cov_phases:
@@ -746,45 +739,38 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
     #                     '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
     #     # read in all xi files for all phases
     #     xi_list = [np.loadtxt(path)[:, 1] for path in paths]
-    #     # as cov gets smaller, chisq gets bigger, contour gets smaller
-    #     cov = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
-    #     # save cov
-    #     filepath = os.path.join(  # save to coadd folder for all phases
-    #             save_dir,
-    #             '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
-    #             'z{}'.format(redshift),
-    #             '{}-cross-xi_{}-cov.txt'.format(model_name, ell))
-    #     np.savetxt(filepath, cov, fmt=txtfmt)
 
     # calculate monoquad cov for baofit, 4 types of covariance
-    for recon, rand in product(['pre-recon', 'post-recon-std'], ['ar', 'nr']):
+    for rec, rnd in product(['pre-recon', 'post-recon-std'], ['ar', 'nr']):
         xi_list = []
         for phase in cov_phases:
             sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
             paths0 = sorted(glob(os.path.join(
                             save_dir, sim_name, 'z{}-r*'.format(redshift),
                             '{}-cross_*xi_0*{}*{}.txt'
-                            .format(model_name, recon, rand))))
+                            .format(model_name, rec, rnd))))
             paths2 = sorted(glob(os.path.join(
                             save_dir, sim_name, 'z{}-r*'.format(redshift),
                             '{}-cross_*xi_2*{}*{}.txt'
-                            .format(model_name, recon, rand))))
+                            .format(model_name, rec, rnd))))
             assert len(paths0) == len(paths2)
             if len(paths0) == 0:
-                break
+                break  # no xi_0 in current phase directory
             for path0, path2 in zip(paths0, paths2):
                 # sorted list of paths within a phase guarantees
                 # xi0 and xi2 are from the same realisation
                 xi_0 = np.loadtxt(path0)[:, 1]
                 xi_2 = np.loadtxt(path2)[:, 1]
                 xi_list.append(np.hstack((xi_0, xi_2)))
-        cov_monoquad = xi1d_list_to_cov(xi_list) / (np.power(N_sub, 3)-1) / 15
+        print('Calculating covariance matrix from {} xi samples...'
+              .format(len(xi_list)))
+        cov_monoquad = np.cov(np.array(xi_list).T, bias=0)
+        # correct for volume and jackknife
+        cov_monoquad = cov_monoquad / (np.power(N_sub, 3)-1) / 15
         filepath = os.path.join(  # save to coadd folder for all phases
-                save_dir,
-                '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
-                'z{}'.format(redshift),
-                '{}-cross-xi_monoquad-cov-{}-{}.txt'
-                .format(model_name, recon, rand))
+            save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
+            'z{}'.format(redshift),
+            '{}-cross-xi_monoquad-cov-{}-{}.txt'.format(model_name, rec, rnd))
         np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
         # print('Monoquad covariance matrix saved to: ', filepath)
 
@@ -845,10 +831,8 @@ if __name__ == "__main__":
         for model_name in model_names:
             do_realisations(halocat, model_name, phase, N_reals)
             coadd_realisations(model_name, phase, N_reals)
-
     for model_name in model_names:
         coadd_phases(model_name, coadd_phases=phases)
         do_cov(model_name, N_sub=N_sub, cov_phases=phases)
     combine_galaxy_table_metadata()
-
     # run_baofit_parallel(baofit_phases=range(16))

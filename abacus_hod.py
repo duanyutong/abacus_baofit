@@ -220,11 +220,11 @@ def N_sat_mean(M, param_dict):
     kappa = param_dict['kappa']
     alpha = param_dict['alpha']
     ncm = N_cen_mean(M, param_dict)
-    mask = (M - kappa * Mcut) / M1 < 0  # if this < 0, should get 0 probability
-    nsm = ncm * np.power((M - kappa * Mcut) / M1, alpha)
-    # replace NaN with 0, also get rid of even power of negative number
+    # numpy does not like fractional power of a negative number
+    # if base < 0, should get 0 probability anyways
+    nsm = ncm * np.power(np.abs(M - kappa * Mcut) / M1, alpha)
+    mask = (M - kappa * Mcut) / M1 < 0
     nsm[mask] = 0
-
     return nsm
 
 
