@@ -641,9 +641,10 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True):
             model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
-            print('r = {}, loading existing galaxy table: {}'.format(gt_path))
+            print('r = {}, loading existing galaxy table: {}'
+                  .format(model.r, gt_path))
             model.mock.galaxy_table = gt = table.Table.read(
-                gt_path, format='fast_csv',
+                gt_path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
             for pos in ['x', 'y', 'z']:
                 gt[pos] = gt[pos].astype(np.float32)

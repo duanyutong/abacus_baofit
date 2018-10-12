@@ -13,7 +13,8 @@ from glob import glob
 from itertools import product
 from functools import partial
 import subprocess
-from multiprocessing import Pool
+import multiprocessing
+import multiprocessing.pool
 import traceback
 import numpy as np
 from astropy import table
@@ -32,7 +33,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'recon'  # 'z0.5'
-phases = range(7, 16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(13, 16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -75,18 +76,18 @@ halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
-# # %% MP Class
-# class NoDaemonProcess(Process):
-#     # make 'daemon' attribute always return False
-#     def _get_daemon(self):
-#         return False
-#     def _set_daemon(self, value):
-#         pass
-#     daemon = property(_get_daemon, _set_daemon)
-# # We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
-# # because the latter is only a wrapper function, not a proper class.
-# class Pool(pool.Pool):
-#     Process = NoDaemonProcess
+# %% MP Class
+class NoDaemonProcess(multiprocessing.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# because the latter is only a wrapper function, not a proper class.
+class MyPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
 
 
 # %% definitionss of statisical formulae and convenience functions
@@ -632,7 +633,7 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    with closing(Pool(processes=3, maxtasksperchild=1)) as p:
+    with closing(MyPool(processes=3, maxtasksperchild=1)) as p:
         p.map(partial(do_realisation, model_name=model_name),
               range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
@@ -789,7 +790,7 @@ def combine_galaxy_table_metadata():
         raise NameError('Galaxy table metadata incomplete. Missing:\n{}'
                         .format(np.array(paths)[~np.where(exist)]))
     tables = [table.Table.read(
-                path, format='fast_csv',
+                path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
               for path in tqdm(paths)]
     gt_meta = table.vstack(tables)
@@ -817,7 +818,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    with closing(Pool(16)) as p:
+    with closing(MyPool(16)) as p:
         p.map(baofit, list_of_inputs)
 
 
