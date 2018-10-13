@@ -4,12 +4,13 @@ import os
 import numpy as np
 from scipy.optimize import minimize
 import sys
+import traceback
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/emulator_1100box_planck-z0.5/' # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-recon/' # this is the save directory
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin
@@ -295,50 +296,55 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
 
 def baofit(inputs):
 # def baofit():
-
-    path_xi_0, path_xi_2, path_cov, fout_tag = inputs
-    r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
-    d0 = np.loadtxt(path_xi_0)[:, 1]
-    d2 = np.loadtxt(path_xi_2)[:, 1]
-    c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
-    if len(c) != len(d0)*2: print('MISMATCHED data and cov matrix!')
-    if len(d0) != len(d2): print('0 and 2 components of xi mismatch')
-    # create data vectors in given range
-    r_mask = (rmin < r_bins_centre) & (r_bins_centre < rmax)
-    rl = np.hstack([r_bins_centre[r_mask], r_bins_centre[r_mask]]) * 1.000396 #factor to correct for pairs should have slightly larger average pair distance than the bin center
-    dv = np.hstack([d0[r_mask], d2[r_mask]])
-    # dv_len = int(dv.size/2) # length of selected data vector for ell = 0 and 2
-    rb_mask = r_mask & (r_bins_centre < rbmax)
-    rlb = np.hstack([r_bins_centre[rb_mask], r_bins_centre[rb_mask]]) * 1.000396
-    dvb = np.hstack([d0[rb_mask], d2[rb_mask]])
-    # dvb_len = int(dvb.size/2)
-    print('{} - length of data vector (0 and 2 components): {}'.format(fout_tag, len(dv)))
-    # create cov matrix for data, must keep the cov between mono and quadrupole
-    ri_mask = np.tile(r_mask, (len(r_mask), 1)).transpose()
-    rj_mask = np.tile(r_mask, (len(r_mask), 1))
-    quadrant_mask = ri_mask & rj_mask
-    covm_mask = np.tile(quadrant_mask, (2,2))
-    covm = c[covm_mask].reshape(dv.size, dv.size)
-    invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
-    # covm for bias
-    rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()
-    rbj_mask = np.tile(rb_mask, (len(rb_mask), 1))
-    quadrant_mask = rbi_mask & rbj_mask
-    covmb_mask = np.tile(quadrant_mask, (2,2))
-    covmb = c[covmb_mask].reshape(dvb.size, dvb.size)
-    invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
-    invcb = np.linalg.pinv(covmb)
-    # define template
-    mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
-    alrm, altm, chim = Xism_arat_1C_an(
-        dv, invc, rl, mod, dvb, invcb, rlb, 
-        armin=1.010, armax=1.060, spar=0.0004,
-        atmin=1.005, atmax=1.035, spat=0.0004, fout = fout_tag)
-    print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
-    return alrm, altm
-
+    try:
+        path_xi_0, path_xi_2, path_cov, fout_tag = inputs
+        r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
+        d0 = np.loadtxt(path_xi_0)[:, 1]
+        d2 = np.loadtxt(path_xi_2)[:, 1]
+        c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
+        if len(c) != len(d0)*2: print('MISMATCHED data and cov matrix!')
+        if len(d0) != len(d2): print('0 and 2 components of xi mi smatch')
+        # create data vectors in given range
+        r_mask = (rmin < r_bins_centre) & (r_bins_centre < rmax)
+        rl = np.hstack([r_bins_centre[r_mask], r_bins_centre[r_mask]]) * 1.000396 #factor to correct for pairs should have slightly larger average pair distance than the bin center
+        dv = np.hstack([d0[r_mask], d2[r_mask]])
+        # dv_len = int(dv.size/2) # length of selected data vector for ell = 0 and 2
+        rb_mask = r_mask & (r_bins_centre < rbmax)
+        rlb = np.hstack([r_bins_centre[rb_mask], r_bins_centre[rb_mask]]) * 1.000396
+        dvb = np.hstack([d0[rb_mask], d2[rb_mask]])
+        # dvb_len = int(dvb.size/2)
+        print('{} - length of data vector (0 and 2 components): {}'.format(fout_tag, len(dv)))
+        # create cov matrix for data, must keep the cov between mono and quadrupole
+        ri_mask = np.tile(r_mask, (len(r_mask), 1)).transpose()
+        rj_mask = np.tile(r_mask, (len(r_mask), 1))
+        quadrant_mask = ri_mask & rj_mask
+        covm_mask = np.tile(quadrant_mask, (2,2))
+        covm = c[covm_mask].reshape(dv.size, dv.size)
+        if np.any(covm == np.nan):
+            print('NaN values at: ', np.where(covm == np.nan))
+        invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
+        # covm for bias
+        rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()
+        rbj_mask = np.tile(rb_mask, (len(rb_mask), 1))
+        quadrant_mask = rbi_mask & rbj_mask
+        covmb_mask = np.tile(quadrant_mask, (2,2))
+        covmb = c[covmb_mask].reshape(dvb.size, dvb.size)
+        invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
+        invcb = np.linalg.pinv(covmb)
+        # define template
+        mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
+        alrm, altm, chim = Xism_arat_1C_an(
+            dv, invc, rl, mod, dvb, invcb, rlb, 
+            armin=0.995, armax=1.070, spar=0.0004,
+            atmin=1.000, atmax=1.035, spat=0.0004, fout = fout_tag)
+        print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
+        return alrm, altm
+    except Exception as E:
+        print('Exception caught in worker thread {}'.format(fout_tag))
+        traceback.print_exc()
+        raise E
 
 if __name__ == '__main__':
 
-    # baofit()
-    baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+        baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+    

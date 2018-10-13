@@ -603,7 +603,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model, gt_path=None, add_rsd=True):
+def populate_model(halocat, model, gt_path='', add_rsd=True):
 
     # use halotools HOD
     if model.model_type == 'prebuilt':
@@ -633,7 +633,7 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True):
             # halo_table already had N_cut correction, just copy tables
             model.mock.halo_table = halocat.halo_table
             model.mock.halo_ptcl_table = halocat.halo_ptcl_table
-        if gt_path is None or not os.path.exists(gt_path):
+        if gt_path == '' or not os.path.isfile(gt_path):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
             print('r = {}, populating {} halos, ...'
                   .format(model.r, len(model.mock.halo_table)))
@@ -642,7 +642,7 @@ def populate_model(halocat, model, gt_path=None, add_rsd=True):
         elif os.path.exists(gt_path):
             print('r = {}, loading existing galaxy table: {}'.format(gt_path))
             model.mock.galaxy_table = gt = table.Table.read(
-                gt_path, format='fast_csv',
+                gt_path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
             for pos in ['x', 'y', 'z']:
                 gt[pos] = gt[pos].astype(np.float32)
