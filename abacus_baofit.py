@@ -13,8 +13,7 @@ from glob import glob
 from itertools import product
 from functools import partial
 import subprocess
-import multiprocessing
-import multiprocessing.pool
+from multiprocessing import Pool
 import traceback
 import numpy as np
 from astropy import table
@@ -33,7 +32,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'recon'  # 'z0.5'
-phases = range(13, 16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(7, 16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
@@ -76,18 +75,18 @@ halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
-# %% MP Class
-class NoDaemonProcess(multiprocessing.Process):
-    # make 'daemon' attribute always return False
-    def _get_daemon(self):
-        return False
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
-# because the latter is only a wrapper function, not a proper class.
-class MyPool(multiprocessing.pool.Pool):
-    Process = NoDaemonProcess
+# # %% MP Class
+# class NoDaemonProcess(Process):
+#     # make 'daemon' attribute always return False
+#     def _get_daemon(self):
+#         return False
+#     def _set_daemon(self, value):
+#         pass
+#     daemon = property(_get_daemon, _set_daemon)
+# # We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# # because the latter is only a wrapper function, not a proper class.
+# class Pool(pool.Pool):
+#     Process = NoDaemonProcess
 
 
 # %% definitionss of statisical formulae and convenience functions
@@ -134,7 +133,7 @@ def dp_estimator(nD1, nR1, D1D2, R1D2):
     return xi
 
 
-def ls_estimator(DD, DR, RD, RR):
+def ls_estimator(DD, DR, RD, RR, RR_denominator):
     '''
     generalised Landy & Szalay (1993) estimator for cross-correlation;
     reduces to (DD-2DR+RR)RR in case of auto-correlation if we set
@@ -145,7 +144,7 @@ def ls_estimator(DD, DR, RD, RR):
 #    DR = DRraw / ND1 / NR2
 #    RD = RDraw / NR1 / ND2
 #    RR = RRraw / NR1 / NR2
-    return (DD - DR - RD + RR) / RR
+    return (DD - DR - RD + RR) / RR_denominator
 
 
 def rebin_smu_counts(cts):
@@ -208,7 +207,7 @@ def coadd_correlation(corr_list):
 
     '''
     arr = np.array(corr_list)
-    coadd = np.median(arr, axis=0)
+    coadd = np.mean(arr, axis=0)
     err = np.std(arr, axis=0)
     if arr.shape[2] == 2:
         # each input array in list is of shape (:, 2), and 1st column is r
@@ -306,7 +305,7 @@ def do_auto_correlation(model, mode='smu-pre-recon',
                                 '{}-auto-paircount-RR-{}-ar.txt'
                                 .format(model_name, mode)),
                    RR_ar, fmt=txtfmt)
-        xi_s_mu = ls_estimator(DD, DR_ar, DR_ar, RR_ar)
+        xi_s_mu = ls_estimator(DD, DR_ar, DR_ar, RR_ar, RR_ar)
         xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
         xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
         xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
@@ -347,7 +346,7 @@ def do_auto_correlation(model, mode='smu-pre-recon',
             DR_nr = DR_npairs / ND / NR
             RR_nr = RR_npairs / NR / NR
             assert DD.shape == DR_nr.shape == RR_nr.shape
-            xi_s_mu = ls_estimator(DD, DR_nr, DR_nr, RR_nr)
+            xi_s_mu = ls_estimator(DD, DR_nr, DR_nr, RR_nr, RR_nr)
             xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
             xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
             xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
@@ -391,8 +390,8 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, model.r))
     # split the (already shuffled) randoms into N copies, each of size NData
-    Ncopies = int(random_multiplier/2)
-    nr_list = np.array_split(model.mock.numerical_randoms, Ncopies)
+    N_copies = int(random_multiplier/2)
+    nr_list = np.array_split(model.mock.numerical_randoms, N_copies)
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
         print('r = {}, x-corr for subvolume {} ...'.format(model.r, linind))
@@ -430,7 +429,7 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
             DR = DR_npairs / ND1 / NR2
             RD = RD_npairs / NR1 / ND2
             RR_list = []
-            for n in range(Ncopies):  # for each split copy of R
+            for n in range(N_copies):  # for each split copy of R
                 nr = nr_list[n]  # this is one of the N copies from R split
                 xr1, yr1, zr1 = nr[:, 0], nr[:, 1], nr[:, 2]
                 xr2, yr2, zr2 = subvol_mask(xr1, yr1, zr1, i, j, k, L, N_sub)
@@ -441,7 +440,7 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
                               boxsize=L, c_api_timer=False)
                 RR_npairs, _ = rebin_smu_counts(RRnpy)
                 RR_list.append(RR_npairs / NR1 / NR2)
-            RR = np.median(RR_list, axis=0)  # could be co-adding zeros
+            RR = np.mean(RR_list, axis=0)  # could be co-adding zeros
             # RR[RR == 0] = np.nan  # if end up with 0, replace with nan
             assert DD.shape == DR.shape == RD.shape == RR.shape
             for npy, txt, tag in zip([DRnpy, RDnpy, RRnpy],  # save counts
@@ -455,7 +454,11 @@ def do_subcross_correlation(model, N_sub=3, mode='smu-post-recon-std',
                         filedir, '{}-cross_{}-paircount-{}-{}-nr_rebinned.txt'
                         .format(model_name, linind, tag, mode)),
                     txt, fmt=txtfmt)
-            xi_s_mu = ls_estimator(DD, DR, RD, RR)  # divide by 0 when RR=0
+            # use analytic RR as denominator in LS estimator
+            _, _, RR_npairs = analytic_random(
+                ND1, NR1, ND2, NR2, s_bins, mu_bins, Lbox.prod())
+            RR_ar = RR_npairs / NR1 / NR2
+            xi_s_mu = ls_estimator(DD, DR, RD, RR, RR_ar)
             xi_0 = tpcf_multipole(xi_s_mu, mu_bins, order=0)
             xi_2 = tpcf_multipole(xi_s_mu, mu_bins, order=2)
             xi_0_txt = np.vstack([s_bins_centre, xi_0]).T
@@ -633,7 +636,7 @@ def do_realisations(halocat, model_name, phase, N_reals):
     print('---\nWorking on {} realisations of {}, model {}...\n---\n'
           .format(N_reals, sim_name, model_name))
     # create n_real realisations of the given HOD model
-    with closing(MyPool(processes=3, maxtasksperchild=1)) as p:
+    with closing(Pool(processes=3, maxtasksperchild=1)) as p:
         p.map(partial(do_realisation, model_name=model_name),
               range(N_reals))
     print('---\nPool closed cleanly for {} realisations of model {}.\n---'
@@ -790,7 +793,7 @@ def combine_galaxy_table_metadata():
         raise NameError('Galaxy table metadata incomplete. Missing:\n{}'
                         .format(np.array(paths)[~np.where(exist)]))
     tables = [table.Table.read(
-                path, format='ascii.fast_csv',
+                path, format='fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
               for path in tqdm(paths)]
     gt_meta = table.vstack(tables)
@@ -818,7 +821,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
                                     .format(model_name))
             fout_tag = '{}-{}'.format(model_name, phase)
             list_of_inputs.append([path_xi_0, path_xi_2, path_cov, fout_tag])
-    with closing(MyPool(16)) as p:
+    with closing(Pool(16)) as p:
         p.map(baofit, list_of_inputs)
 
 
