@@ -358,7 +358,7 @@ def do_subcross_count(model, mode='smu-post-recon-std',
         sr_list = np.array_split(model.mock.shifted_randoms, random_multiplier)
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        print('r = {}, x-corr counting, subvol {} ...'.format(model.r, linind))
+        print('r = {}, x-corr counting, subvol {}...'.format(model.r, linind))
         x2, y2, z2 = subvol_mask(gt['x'], gt['y'], gt['z'], i, j, k, L, N_sub)
         ND2 = x2.size  # number of galaxies in the subvolume
         DDnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
@@ -431,11 +431,10 @@ def do_subcross_correlation(phase, r, mode='smu-post-recon-std',
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     filedir = os.path.join(save_dir, sim_name, 'z{}-r{}'.format(redshift, r))
     for i, j, k in product(range(N_sub), repeat=3):
-        linind = i*N_sub**2 + j*N_sub + k
-        print('r = {}, x-corr subvolume {}...'.format(r, linind))
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        DDnpy = np.load(os.path.join(filedir, '{}-cross_{}-paircount-DD.npy'
-                                     .format(model_name, linind)))
+        print('r = {}, x-correlation subvolume {}...'.format(r, linind))
+        DDnpy = np.load(os.path.join(filedir, '{}-cross_{}-paircount-DD-{}.npy'
+                                     .format(model_name, linind, mode)))
         DD, _ = rebin_smu_counts(DDnpy, 'DD')  # re-bin and re-weight
         np.savetxt(os.path.join(filedir,
                                 '{}-cross_{}-paircount-DD-{}-rebinned.txt'
@@ -539,6 +538,8 @@ def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
                 do_cross_count = False
             if len(glob(temp+'-auto-fftcorr_N-post-recon-ite*.txt')) == 1:
                 do_recon_ite = False
+            if len(glob(temp+'-cross_*-DD-smu-post*rebinned.txt')) == 27:
+                do_subcross_corr = False
         flags = [do_auto_smu, do_fftcorr_pre_recon, do_recon_std,
                  do_wp, do_cross_count, do_recon_ite]
         if not np.any(flags):

@@ -790,7 +790,7 @@ def make_galaxies(model, add_rsd=True):
     #                                   ht['halo_subsamp_start'].data[1:])
     #     print('Calculating perihelion distance rankings with MP...')
     #     pt['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
-    print('r = {}, ranking particles within each halo for...'.format(model.r))
+    print('r = {}, ranking particles within each halo...'.format(model.r))
     for i in range(N_halos):
         m = ht['halo_subsamp_start'][i]
         n = ht['halo_subsamp_len'][i]
