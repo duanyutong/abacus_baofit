@@ -163,8 +163,9 @@ def rebin_smu_counts(cts, npairs_key):
     savg is the paircount-weighted average of s in the bin, same dimension
     which may be inaccurate when bins are very fine and cmpty
     '''
-    ratio = cts['npairs'] / cts['npairs_key']
-    assert np.all(np.around(ratio) == np.around(ratio[0]))
+    mask = cts['npairs'] != 0  # bins where npairs=0 yields NaN ratio
+    ratio = np.around(cts['npairs'][mask] / cts[npairs_key][mask])
+    assert np.all(ratio == np.median(ratio))
     npairs = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.float64)
     savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.float64)
     bins_included = 0
@@ -180,7 +181,7 @@ def rebin_smu_counts(cts, npairs_key):
             savg[m, n] = (s_bins[m] + s_bins[m+1]) / 2
         else:
             savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
-        bins_included += cts['npairs'][mask].size
+        bins_included += arr['npairs'].size
 
     try:
         assert cts.size == bins_included
@@ -197,7 +198,7 @@ def rebin_smu_counts(cts, npairs_key):
 #        for i in range(indices[0].size):
 #            print('({}, {}) bin is empty'
 #                  .format(indices[0][i], indices[1][i]))
-    return npairs/np.around(ratio[0]), savg
+    return npairs/np.median(ratio), savg
 
 
 def subvol_mask(x, y, z, i, j, k, L, N_sub):
@@ -539,11 +540,12 @@ def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
             if len(glob(temp+'-auto-fftcorr_N-post-recon-ite*.txt')) == 1:
                 do_recon_ite = False
             if len(glob(temp+'-cross_*-DD-smu-post*rebinned.txt')) == 27:
+                print('r = {}, skipping subcross correlation.'.format(r))
                 do_subcross_corr = False
         flags = [do_auto_smu, do_fftcorr_pre_recon, do_recon_std,
                  do_wp, do_cross_count, do_recon_ite]
         if not np.any(flags):
-            print('r = {}, all counting done.'.format(r))
+            print('r = {}, all counting done,'.format(r))
             do_count = False
         if do_count:  # require loading halocat
             # print('Counting to-do: ', flags)
