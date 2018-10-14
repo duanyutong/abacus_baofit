@@ -10,7 +10,7 @@ import traceback
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/emulator_1100box_planck-recon/' # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-recon-test/' # this is the save directory
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin

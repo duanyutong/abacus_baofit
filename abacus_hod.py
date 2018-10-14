@@ -93,16 +93,14 @@ def process_rockstar_halocat(halocat, N_cut=70):
 
     '''
 
-    print('Applying mass cut N = {} to halocat and re-organising subsamples...'
-          .format(N_cut))
+    print('Applying mass cut N = {} to halocat...'.format(N_cut))
     N0 = len(halocat.halo_table)
     mask_halo = ((halocat.halo_table['halo_upid'] == -1)  # only host halos
                  & (halocat.halo_table['halo_N'] >= N_cut))
     #             & (halocat.halo_table['halo_subsamp_len'] > 0))
     mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)  # child subhalos
-                    & np.isin(
-                            halocat.halo_table['halo_upid'],
-                            halocat.halo_table['halo_id'][mask_halo]))
+                    & np.isin(halocat.halo_table['halo_upid'],
+                              halocat.halo_table['halo_id'][mask_halo]))
     htab = halocat.halo_table[mask_halo | mask_subhalo]  # original order
     print('Locating relevant halo host ids in halo table...')
     hostids, hidx, hidx_split = find_repeated_entries(htab['halo_hostid'].data)
@@ -119,7 +117,7 @@ def process_rockstar_halocat(halocat, N_cut=70):
                        hidx_split)
     p.close()
     p.join()
-    htab = htab[htab['halo_upid'] == -1]  # drop subhalos now that ptcl r done
+    htab = htab[htab['halo_upid'] == -1]  # drop subhalos after ptcl are done
     assert len(htab) == len(hostids)  # sanity check, hostids are unique values
     htab = htab[htab['halo_hostid'].data.argsort()]
     htab['halo_subsamp_len'] = ss_len  # overwrite halo_subsamp_len field
@@ -639,7 +637,8 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
-            print('r = {}, loading existing galaxy table: {}'.format(gt_path))
+            print('r = {}, loading existing galaxy table: {}'
+                  .format(model.r, gt_path))
             model.mock.galaxy_table = gt = table.Table.read(
                 gt_path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
