@@ -334,7 +334,6 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir',
     # initial X = 1, set first iteration value by hand
     X2 = np.sqrt(vt2/(vr2 + vt2))  # has NaN when v_pec = 0
     X2[np.isnan(X2)] = 1  # set nan values to 1 to restore r_0 = r_min
-
     i = 0
     print('Calculating X2 for perihelion ranking...')
     for i in range(max_iter):

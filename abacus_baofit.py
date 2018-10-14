@@ -13,7 +13,8 @@ from glob import glob
 from itertools import product
 from functools import partial
 import subprocess
-from multiprocessing import Pool
+import multiprocessing
+import multiprocessing.pool
 import traceback
 import numpy as np
 import numpy.lib.recfunctions as rfn
@@ -32,19 +33,21 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon'  # 'z0.5'
+tagout = 'recon-test'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
-               'gen_ass1', 'gen_ass2', 'gen_ass3',
-               'gen_ass1_n', 'gen_ass2_n', 'gen_ass3_n',
-               'gen_s1', 'gen_sv1', 'gen_sp1',
-               'gen_s1_n', 'gen_sv1_n', 'gen_sp1_n',
-               'gen_vel1', 'gen_allbiases', 'gen_allbiases_n']
-model_names = ['gen_base1', 'gen_base4', 'gen_base5',
-               'gen_ass1', 'gen_ass2', 'gen_ass3']
+               'gen_ass1', 'gen_ass1_n',
+               'gen_ass2', 'gen_ass2_n',
+               'gen_ass3', 'gen_ass3_n',
+               'gen_s1', 'gen_s1_n',
+               'gen_sv1', 'gen_sv1_n',
+               'gen_sp1', 'gen_sp1_n',
+               'gen_vel1']
+#model_names = ['gen_base1', 'gen_base4', 'gen_base5',
+#               'gen_ass1', 'gen_ass2', 'gen_ass3']
 N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_threads = 10  # for a single MP pool thread
@@ -77,18 +80,22 @@ halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
 
-# # %% MP Class
-# class NoDaemonProcess(Process):
-#     # make 'daemon' attribute always return False
-#     def _get_daemon(self):
-#         return False
-#     def _set_daemon(self, value):
-#         pass
-#     daemon = property(_get_daemon, _set_daemon)
-# # We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
-# # because the latter is only a wrapper function, not a proper class.
-# class Pool(pool.Pool):
-#     Process = NoDaemonProcess
+
+# %% MP Class
+class NoDaemonProcess(multiprocessing.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+
+# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# because the latter is only a wrapper function, not a proper class.
+class MyPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
 
 
 # %% definitionss of statisical formulae and convenience functions
@@ -616,8 +623,7 @@ def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
             # assert os.path.isfile(  # check reconstructed catalogue exists
             # os.path.join(recon_temp_dir, 'file_D-{}_rec'.format(seed)))
         if do_auto_corr:
-            do_auto_correlation(model_name, phase, r, mode='smu-pre-recon',
-                                use_shifted_randoms=True)
+            do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
         if do_subcross_corr:
             do_subcross_correlation(phase, r, mode='smu-post-recon-std',
                                     use_shifted_randoms=True)
@@ -843,33 +849,31 @@ def run_baofit_parallel(baofit_phases=range(16)):
                 fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
                 list_of_inputs.append(
                     [path_xi_0, path_xi_2, path_cov, fout_tag])
-    with closing(Pool(30)) as p:
+    with closing(MyPool(30)) as p:
         p.map(baofit, list_of_inputs)
 
 
 if __name__ == "__main__":
 
-    # c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
-    #                              redshift, cosmology)
-    # for phase in phases:
-    #     global halocat
-    #     for model_name in model_names:
-    #         print('-*\nWorking on {} realisations of phase {}, model {}...'
-    #               .format(N_reals, phase, model_name))
-    #         # create n_real realisations of the given HOD model
-    #         with closing(Pool(processes=1, maxtasksperchild=1)) as p:
-    #             p.map(partial(do_realisation,
-    #                           phase=phase, model_name=model_name,
-    #                           auto_count=False, auto_corr=True,
-    #                           cross_count=False, cross_corr=True,
-    #                           overwrite=True),
-    #                   range(N_reals))
-    #         print('--\nPool closed cleanly for model {}.\n--'
-    #               .format(model_name))
-    #         coadd_realisations(model_name, phase, N_reals)
+    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
+                                 redshift, cosmology)
+    for phase in phases:
+        global halocat
+        for model_name in model_names:
+            print('-*\nWorking on {} realisations of phase {}, model {}...'
+                  .format(N_reals, phase, model_name))
+            with closing(MyPool(processes=1, maxtasksperchild=1)) as p:
+                p.map(partial(do_realisation,
+                              phase=phase, model_name=model_name,
+                              overwrite=False, do_count=True,
+                              do_auto_corr=True, do_subcross_corr=True),
+                      range(N_reals))
+            print('--\nPool closed cleanly for model {}.\n--'
+                  .format(model_name))
+            coadd_realisations(model_name, phase, N_reals)
     for model_name in model_names:
-        # coadd_phases(model_name, coadd_phases=phases)
-        # do_cov(model_name, N_sub=N_sub, cov_phases=phases)
+        coadd_phases(model_name, coadd_phases=phases)
+        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
         convert_recon_correlation(model_name, phases=phases)
-    # combine_galaxy_table_metadata()
-    run_baofit_parallel(baofit_phases=range(16))
+    combine_galaxy_table_metadata()
+    # run_baofit_parallel(baofit_phases=range(16))
