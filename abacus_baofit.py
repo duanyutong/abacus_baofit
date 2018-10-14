@@ -163,7 +163,8 @@ def rebin_smu_counts(cts, npairs_key):
     savg is the paircount-weighted average of s in the bin, same dimension
     which may be inaccurate when bins are very fine and cmpty
     '''
-
+    ratio = cts['npairs'] / cts['npairs_key']
+    assert np.all(np.around(ratio) == np.around(ratio[0]))
     npairs = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.float64)
     savg = np.zeros((s_bins.size-1, mu_bins.size-1), dtype=np.float64)
     bins_included = 0
@@ -174,30 +175,29 @@ def rebin_smu_counts(cts, npairs_key):
             (s_bins[m] <= cts['smin']) & (cts['smax'] <= s_bins[m+1]) &
             (mu_bins[n] < cts['mu_max']) & (cts['mu_max'] <= mu_bins[n+1]))
         arr = cts[mask]
-        npairs[m, n] = arr[npairs_key].sum()
+        npairs[m, n] = arr['npairs'].sum()
         if npairs[m, n] == 0:
             savg[m, n] = (s_bins[m] + s_bins[m+1]) / 2
         else:
-            savg[m, n] = np.sum(arr['savg'] * arr[npairs_key] / npairs[m, n])
-        bins_included += cts[npairs_key][mask].size
+            savg[m, n] = np.sum(arr['savg'] * arr['npairs'] / npairs[m, n])
+        bins_included += cts['npairs'][mask].size
 
     try:
         assert cts.size == bins_included
-        assert np.around(cts[npairs_key].sum(), decimals=14) == \
-            np.around(npairs.sum(), decimals=14)
+        assert cts['npairs'].sum() == npairs.sum()
     except AssertionError as E:
         print('Total fine bins: {}. Total bins included: {}'
               .format(cts.size, bins_included))
-        print(('Total (normalised) npairs in fine bins: {:0.40f}. '
-               'Total npairs after rebinning: {:0.40f}.')
-              .format(cts[npairs_key].sum(), npairs.sum()))
+        print(('Total raw npairs in fine bins: {:0.3f}. '
+               'Total npairs after rebinning: {:0.3f}.')
+              .format(cts['npairs'].sum(), npairs.sum()))
         raise E
 #    indices = np.where(npairs == 0)
 #    if indices[0].size != 0:  # and np.any(indices[0] != 0):
 #        for i in range(indices[0].size):
 #            print('({}, {}) bin is empty'
 #                  .format(indices[0][i], indices[1][i]))
-    return npairs, savg
+    return npairs/np.around(ratio[0]), savg
 
 
 def subvol_mask(x, y, z, i, j, k, L, N_sub):
