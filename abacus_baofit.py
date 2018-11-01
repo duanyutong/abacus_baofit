@@ -13,8 +13,6 @@ from glob import glob
 from itertools import product
 from functools import partial
 import subprocess
-import multiprocessing
-import multiprocessing.pool
 import traceback
 import numpy as np
 import numpy.lib.recfunctions as rfn
@@ -25,8 +23,8 @@ from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
 from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
 from Corrfunc.theory.wp import wp
-from abacus_hod import \
-    fit_c_median, process_rockstar_halocat, initialise_model, populate_model
+from abacus_hod import MyPool, fit_c_median, process_rockstar_halocat, \
+    initialise_model, populate_model
 from tqdm import tqdm
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
@@ -34,7 +32,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
 tagout = 'recon-test'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+phases = range(13, 16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
@@ -48,8 +46,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_vel1']
 N_reals = 12  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
-N_concurrent_reals = 3
-N_threads = 10  # number of threads for a single realisation
+N_concurrent_reals = 4
+N_threads = 8  # number of threads for a single realisation
 N_sub = 3  # number of subvolumes per dimension
 random_multiplier = 10
 
@@ -78,23 +76,6 @@ recon_temp_dir = os.path.join(store_dir, 'recon/temp/')
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
-
-
-# %% MP Class
-class NoDaemonProcess(multiprocessing.Process):
-    # make 'daemon' attribute always return False
-    def _get_daemon(self):
-        return False
-
-    def _set_daemon(self, value):
-        pass
-    daemon = property(_get_daemon, _set_daemon)
-
-
-# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
-# because the latter is only a wrapper function, not a proper class.
-class MyPool(multiprocessing.pool.Pool):
-    Process = NoDaemonProcess
 
 
 # %% definitionss of statisical formulae and convenience functions
@@ -217,6 +198,7 @@ def coadd_correlation(corr_list):
     input is a list of xi or wp samples
 
     '''
+    print('Length of items being coadded: ', len(corr_list))
     arr = np.array(corr_list)
     coadd = np.mean(arr, axis=0)
     err = np.std(arr, axis=0)
@@ -506,6 +488,59 @@ def do_subcross_correlation(linind, phase, r, mode='smu-post-recon-std',
                 output, fmt=txtfmt)
 
 
+def do_galaxy_table(r, phase, model_name, overwrite=False):
+
+    sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+    filedir = os.path.join(save_dir, sim_name,
+                           'z{}-r{}'.format(redshift, r))
+    gt_path = os.path.join(filedir, '{}-galaxy_table.csv'.format(model_name))
+    seed = phase*100 + r
+    if os.path.isfile(gt_path):
+        return
+    global halocat
+    try:
+        assert halocat.ZD_Seed == phase
+    except NameError or AssertionError:
+        halocat = make_halocat(phase)
+        process_rockstar_halocat(halocat, N_cut=N_cut)
+    # all realisations in parallel, each model needs to be instantiated
+    model = initialise_model(redshift, model_name,
+                             halo_m_prop=halo_m_prop)
+    # random seed w/ phase and realisation index r, model independent
+    print('r = {} for phase {}, model {} starting...'
+          .format(r, phase, model_name))
+    model = populate_model(halocat, model, add_rsd=add_rsd,
+                           gt_path=reuse_galaxies * gt_path)
+    gt = model.mock.galaxy_table
+    # save galaxy table if it's not already loaded from disk
+    if save_hod_realisation and not model.mock.gt_loaded:
+        print('r = {}, saving galaxy table...'.format(r))
+        try:
+            os.makedirs(os.path.dirname(gt_path))
+        except OSError:
+            pass
+        gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
+        # save galaxy table metadata to sim directory, one file each
+        # to be combined later to avoid threading conflicts
+        N_cen = np.sum(gt['gal_type'] == 'centrals')
+        N_sat = np.sum(gt['gal_type'] == 'satellites')
+        assert N_cen + N_sat == model.mock.ND
+        gt_meta = table.Table(
+                [[model_name], [phase], [r], [seed],
+                 [N_cen], [N_sat], [model.mock.ND]],
+                names=('model name', 'phase', 'realisation', 'seed',
+                       'N centrals', 'N satellites', 'N galaxies'),
+                dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
+        if not os.path.exists(os.path.join(save_dir,
+                                           'galaxy_table_meta')):
+            os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
+        gt_meta.write(os.path.join(
+                save_dir, 'galaxy_table_meta',
+                '{}-z{}-{}-r{}.csv'
+                .format(model_name, redshift, phase, r)),
+            format='ascii.fast_csv', overwrite=True)
+
+
 def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
                    do_auto_corr=True, do_subcross_corr=True):
 
@@ -566,33 +601,6 @@ def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
             model = populate_model(halocat, model, add_rsd=add_rsd,
                                    gt_path=reuse_galaxies * gt_path)
             gt = model.mock.galaxy_table
-            # save galaxy table if it's not already loaded from disk
-            if save_hod_realisation and not model.mock.gt_loaded:
-                print('r = {}, saving galaxy table...'.format(r))
-                try:
-                    os.makedirs(os.path.dirname(gt_path))
-                except OSError:
-                    pass
-                gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
-                # save galaxy table metadata to sim directory, one file each
-                # to be combined later to avoid threading conflicts
-                N_cen = np.sum(gt['gal_type'] == 'centrals')
-                N_sat = np.sum(gt['gal_type'] == 'satellites')
-                assert N_cen + N_sat == model.mock.ND
-                gt_meta = table.Table(
-                        [[model_name], [phase], [r], [seed],
-                         [N_cen], [N_sat], [model.mock.ND]],
-                        names=('model name', 'phase', 'realisation', 'seed',
-                               'N centrals', 'N satellites', 'N galaxies'),
-                        dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-                if not os.path.exists(os.path.join(save_dir,
-                                                   'galaxy_table_meta')):
-                    os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
-                gt_meta.write(os.path.join(
-                        save_dir, 'galaxy_table_meta',
-                        '{}-z{}-{}-r{}.csv'
-                        .format(model_name, redshift, phase, r)),
-                    format='ascii.fast_csv', overwrite=True)
             # reconstruction prep work
             m = np.zeros(len(gt))
             arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
@@ -653,7 +661,7 @@ def do_realisation(r, phase, model_name, overwrite=False, do_count=True,
         if do_auto_corr:
             do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
         if do_subcross_corr:
-            with closing(MyPool(processes=N_concurrent_reals,
+            with closing(MyPool(processes=N_threads,
                                 maxtasksperchild=1)) as p:
                 p.map(partial(do_subcross_correlation,
                               phase=phase, r=r, mode='smu-post-recon-std',
@@ -725,6 +733,8 @@ def coadd_phases(model_name, coadd_phases=range(16)):
                            'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
+    coadd_filenames = ['fftcorr_N-post-recon-ite-15.0_hmpc',
+                       'fftcorr_R-post-recon-ite-15.0_hmpc']
     for fn in coadd_filenames:
         temp = os.path.join(
             save_dir,
@@ -738,6 +748,7 @@ def coadd_phases(model_name, coadd_phases=range(16)):
             print('paths are:', paths)
             return False
         corr_list = [np.loadtxt(path) for path in paths]
+        print('dtype is', corr_list[0].dtype)
         coadd, error = coadd_correlation(corr_list)
         np.savetxt(os.path.join(
                 filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
@@ -745,8 +756,11 @@ def coadd_phases(model_name, coadd_phases=range(16)):
         np.savetxt(os.path.join(
                 filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
             error, fmt=txtfmt)
+        print('saved to', os.path.join(
+                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)))
         for phase in coadd_phases:  # jackknife delete-one
             jk_list = corr_list[:phase] + corr_list[phase+1:]
+            assert len(jk_list) == len(coadd_phases) - 1
             coadd, error = coadd_correlation(jk_list)
             np.savetxt(os.path.join(
                     filedir, '{}-auto-{}-jackknife_{}-coadd.txt'
@@ -760,6 +774,7 @@ def coadd_phases(model_name, coadd_phases=range(16)):
 
 def convert_recon_correlation(model_name, phases):
 
+    b = 2.23  # galaxy bias for rescaling xi
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
@@ -774,8 +789,8 @@ def convert_recon_correlation(model_name, phases):
                     .format(model_name, coadd_filenames[6+2*i], phase)))
             assert np.all(N[:, 1] == R[:, 1])
             r = N[:, 1]
-            xi_0 = N[:, 3] / R[:, 3]
-            xi_2 = N[:, 4] / R[:, 3]
+            xi_0 = N[:, 3] / R[:, 3] * np.square(b)
+            xi_2 = N[:, 4] / R[:, 3] * np.square(b)
             xi_0_txt = np.vstack([r, xi_0]).T
             xi_2_txt = np.vstack([r, xi_2]).T
             np.savetxt(os.path.join(
@@ -903,10 +918,14 @@ if __name__ == "__main__":
                   .format(N_reals, phase, model_name))
             with closing(MyPool(processes=N_concurrent_reals,
                                 maxtasksperchild=1)) as p:
+                p.map(partial(do_galaxy_table,
+                              phase=phase, model_name=model_name,
+                              overwrite=False),
+                      range(N_reals))
                 p.map(partial(do_realisation,
                               phase=phase, model_name=model_name,
-                              overwrite=False, do_count=True,
-                              do_auto_corr=True, do_subcross_corr=True),
+                              do_count=True, do_auto_corr=True,
+                              do_subcross_corr=True, overwrite=False),
                       range(N_reals))
             p.close()
             p.join()
@@ -914,8 +933,8 @@ if __name__ == "__main__":
                   .format(model_name))
             coadd_realisations(model_name, phase, N_reals)
     for model_name in model_names:
-        coadd_phases(model_name, coadd_phases=phases)
-        do_cov(model_name, N_sub=N_sub, cov_phases=phases)
-        convert_recon_correlation(model_name, phases=phases)
+        coadd_phases(model_name, coadd_phases=range(16))
+        do_cov(model_name, N_sub=N_sub, cov_phases=range(16))
+        convert_recon_correlation(model_name, phases=range(16))
     combine_galaxy_table_metadata()
-    run_baofit_parallel(baofit_phases=phases)
+    # run_baofit_parallel(baofit_phases=phases)

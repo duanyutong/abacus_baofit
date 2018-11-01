@@ -320,8 +320,11 @@ def baofit(inputs):
         quadrant_mask = ri_mask & rj_mask
         covm_mask = np.tile(quadrant_mask, (2,2))
         covm = c[covm_mask].reshape(dv.size, dv.size)
-        if np.any(covm == np.nan):
+        try:
+            assert not np.any(covm == np.nan)
+        except AssertionError:
             print('NaN values at: ', np.where(covm == np.nan))
+            raise
         invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
         # covm for bias
         rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()

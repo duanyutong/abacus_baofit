@@ -17,7 +17,8 @@ from __future__ import (
         absolute_import, division, print_function, unicode_literals)
 from contextlib import closing
 import os
-from multiprocessing import Pool
+import multiprocessing
+import multiprocessing.pool
 from functools import partial
 import numpy as np
 from scipy.special import erfc
@@ -26,6 +27,23 @@ from astropy import table
 import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 import matplotlib.pyplot as plt
 # plt.switch_backend('Agg')  # switch this on if backend error is reported
+
+
+# %% MP Class
+class NoDaemonProcess(multiprocessing.Process):
+    # make 'daemon' attribute always return False
+    def _get_daemon(self):
+        return False
+
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+
+# We sub-class multiprocessing.pool.Pool instead of multiprocessing.Pool
+# because the latter is only a wrapper function, not a proper class.
+class MyPool(multiprocessing.pool.Pool):
+    Process = NoDaemonProcess
 
 
 def sum_lengths(i, len_arr):
@@ -87,8 +105,10 @@ def process_rockstar_halocat(halocat, N_cut=70):
     particles in halo_ptcl_table.
 
     Output halocat has halo_table containing only halos (not subhalos) meeting
-    the masscut, and halo_ptcl_table containing all particles belonging to the
-    halos selected in contiguous blocks. Also we force subsamp_len > 0 so that
+    the mass cut, and halo_ptcl_table containing all particles belonging to the
+    halos selected in contiguous blocks.
+
+    (?) Also we force subsamp_len > 0 so that
     halo contains at least one subsample particle.
 
     '''
@@ -111,8 +131,7 @@ def process_rockstar_halocat(halocat, N_cut=70):
     ptab = halocat.halo_ptcl_table[pidx]
     # ss_len = [np.sum(htab['halo_subsamp_len'][i]) for i in tqdm(hidx_split)]
     print('Rewriting halo_table subsample fields with multiprocessing...')
-    # with closing(Pool(processes=16, maxtasksperchild=1)) as p:
-    with closing(Pool()) as p:
+    with closing(MyPool()) as p:
         ss_len = p.map(partial(sum_lengths, len_arr=htab['halo_subsamp_len']),
                        hidx_split)
     p.close()
@@ -273,11 +292,6 @@ def do_rsd(z, vz, redshift, cosmology, period):
     return z % period
 
 
-def rank_halo_particles(arr):
-
-    return arr.argsort()[::-1].argsort()
-
-
 # def rank_particles_by_halo(arr_split):
 #     '''
 #     input split array consists of properties of each particle within a halo
@@ -293,6 +307,14 @@ def rank_halo_particles(arr):
 #     with closing(Pool(3)) as p:
 #         rank = p.map(rank_halo_particles, list(arr_split))
 #     return np.concatenate(rank)
+
+
+# def rank_halo_particles(i, rank_key):
+#     global ht, pt
+#     m = ht['subsamp_start'][i]
+#     n = ht['subsamp_len'][i]
+#     rankings = pt[rank_key][m:m+n].argsort()[::-1].argsort()
+#     return rankings
 
 
 def process_particle_props(pt, h, halo_m_prop='halo_mvir',
@@ -343,7 +365,6 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir',
         # set if v_pec = v_rad = v_tan = 0, then X2 = nan, but it should be 1
         X2[np.isnan(X2)] = 1  # set to 1 manually for stationary particles
         Xnew = np.sqrt(X2)
-
         # error analysis
         ferr = np.abs(Xold - Xnew) / Xnew  # for Xnew = 0, this results in inf
         ferr[np.isinf(ferr)] = 0
@@ -765,31 +786,20 @@ def make_galaxies(model, add_rsd=True):
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
         pt[key] = np.int32(-1)
-
-    # print('Creating particle indices...')
-    # pidx = vrange(ht['halo_subsamp_start'].data,
-    #               ht['halo_subsamp_len'].data)
-    # splited arrays by halos, becomes iterable for MP
-    # if model.param_dict['s'] != 0:
-    #     r_centric = pt['r_centric'][pidx].data
-    #     print('Splitting r_centric data array by halos...')
-    #     r_centric_split = np.split(r_centric,
-    #                                ht['halo_subsamp_start'].data[1:])
-    #     print('Calculating halo centric distance rankings with MP...')
-    #     pt['rank_s'] = rank_particles_by_halo(r_centric_split)
-    # if model.param_dict['s_v'] != 0:
-    #     v_pec = pt['v_pec'][pidx]
-    #     print('Splitting v_pec data array by halos...')
-    #     v_pec_split = np.split(v_pec, ht['halo_subsamp_start'].data[1:])
-    #     print('Calculating peculiar speed rankings with MP...')
-    #     pt['rank_s_v'] = rank_particles_by_halo(v_pec_split)
-    # if model.param_dict['s_p'] != 0:
-    #     r_perihelion = pt['r_perihelion'][pidx]
-    #     print('Splitting r_perihelion data array by halos...')
-    #     r_perihelion_split = np.split(r_perihelion,
-    #                                   ht['halo_subsamp_start'].data[1:])
-    #     print('Calculating perihelion distance rankings with MP...')
-    #     pt['rank_s_p'] = rank_particles_by_halo(r_perihelion_split)
+    # for rank_flag, rank_name, rank_key in zip(
+    #     ['s', 's_v', 's_p'],
+    #     ['rank_s', 'rank_s_v', 'rank_s_p'],
+    #     ['r_centric', 'v_pec', 'r_perihelion']):
+    #     if model.param_dict[rank_flag] != 0:
+    #         print('r = {}, ranking particles within each halo by {}...'
+    #               .format(model.r, rank_key))
+    #         with closing(MyPool(processes=10, maxtasksperchild=1)) as p:
+    #             rankings = p.imap(partial(rank_halo_particles,
+    #                                       rank_key=rank_key),
+    #                               range(N_halos))
+    #         p.close()
+    #         p.join()
+    #         pt[rank_name] = np.concatenate(rankings)
     print('r = {}, ranking particles within each halo...'.format(model.r))
     for i in range(N_halos):
         m = ht['halo_subsamp_start'][i]
@@ -804,6 +814,7 @@ def make_galaxies(model, add_rsd=True):
         if model.param_dict['s_p'] != 0:
             pt['rank_s_p'][m:m+n] = pt['r_perihelion'][m:m+n] \
                 .argsort()[::-1].argsort()
+
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     # only re-rank halos where subsamp_len >= 2
