@@ -499,7 +499,6 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
     filedir = os.path.join(save_dir, sim_name,
                            'z{}-r{}'.format(redshift, r))
     gt_path = os.path.join(filedir, '{}-galaxy_table.csv'.format(model_name))
-    seed = phase*100 + r
     if os.path.isfile(gt_path):
         return
     global halocat
@@ -508,6 +507,7 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
     except NameError or AssertionError:
         halocat = make_halocat(phase)
         process_rockstar_halocat(halocat, N_cut=N_cut)
+    seed = phase*100 + r
     # all realisations in parallel, each model needs to be instantiated
     model = initialise_model(redshift, model_name,
                              halo_m_prop=halo_m_prop)
@@ -586,12 +586,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
         else:
             do_count = True
         if do_count:  # everything within is counting, require loading halocat
-            try:
-                assert halocat.ZD_Seed == phase
-            except NameError or AssertionError:
-                print('Halocat mismatch. Reloading...')
-                halocat = make_halocat(phase)
-                process_rockstar_halocat(halocat, N_cut=N_cut)
+            assert halocat.ZD_Seed == phase
             # all realisations in parallel, each model needs to be instantiated
             model = initialise_model(redshift, model_name,
                                      halo_m_prop=halo_m_prop)
@@ -605,33 +600,6 @@ def do_realisation(r, phase, model_name, overwrite=False,
             model = populate_model(halocat, model, add_rsd=add_rsd,
                                    gt_path=reuse_galaxies * gt_path)
             gt = model.mock.galaxy_table
-            # save galaxy table if it's not already loaded from disk
-            if save_hod_realisation and not model.mock.gt_loaded:
-                print('r = {}, saving galaxy table...'.format(r))
-                try:
-                    os.makedirs(os.path.dirname(gt_path))
-                except OSError:
-                    pass
-                gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
-                # save galaxy table metadata to sim directory, one file each
-                # to be combined later to avoid threading conflicts
-                N_cen = np.sum(gt['gal_type'] == 'centrals')
-                N_sat = np.sum(gt['gal_type'] == 'satellites')
-                assert N_cen + N_sat == model.mock.ND
-                gt_meta = table.Table(
-                        [[model_name], [phase], [r], [seed],
-                         [N_cen], [N_sat], [model.mock.ND]],
-                        names=('model name', 'phase', 'realisation', 'seed',
-                               'N centrals', 'N satellites', 'N galaxies'),
-                        dtype=('S30', 'i4', 'i4', 'i4', 'i4', 'i4', 'i4'))
-                if not os.path.exists(os.path.join(save_dir,
-                                                   'galaxy_table_meta')):
-                    os.makedirs(os.path.join(save_dir, 'galaxy_table_meta'))
-                gt_meta.write(os.path.join(
-                        save_dir, 'galaxy_table_meta',
-                        '{}-z{}-{}-r{}.csv'
-                        .format(model_name, redshift, phase, r)),
-                    format='ascii.fast_csv', overwrite=True)
             if do_pre_auto_smu:  # pre-recon auto-correlation pair-counting
                 print('r = {}, pre-recon pair-counting...'.format(r))
                 do_auto_count(model, mode='smu-pre-recon')
@@ -939,7 +907,8 @@ def run_baofit_parallel(baofit_phases=range(16)):
                            'z{}'.format(redshift))
     list_of_inputs = []
     for model_name in model_names:
-        for i in range(3):  # debug
+        # for i in range(3):  # debug
+        for i in [0]:
             xi_type = coadd_filenames[5+2*i][10:]
             for phase in baofit_phases:  # list of inputs for parallelisation
                 path_xi_0 = os.path.join(
@@ -992,7 +961,7 @@ if __name__ == "__main__":
                         do_pre_auto_smu=False,
                         do_pre_auto_fft=False, do_pre_cross=True,
                         do_recon_std=False, do_post_wp=False,
-                        do_post_cross=False, do_recon_ite=True,
+                        do_post_cross=False, do_recon_ite=False,
                         do_pre_auto_corr=False,
                         do_pre_cross_corr=True, do_post_cross_corr=False),
                       range(N_reals))
@@ -1000,13 +969,13 @@ if __name__ == "__main__":
             p.join()
             print('--\nPool closed cleanly for model {}.\n--'
                   .format(model_name))
-        with closing(MyPool(processes=len(model_names),
-                            maxtasksperchild=1)) as p:
-            p.map(partial(coadd_realisations, phase=phase, N_reals=N_reals),
-                  model_names)
-        p.close()
-        p.join()
-    combine_galaxy_table_metadata()
+#        with closing(MyPool(processes=len(model_names),
+#                            maxtasksperchild=1)) as p:
+#            p.map(partial(coadd_realisations, phase=phase, N_reals=N_reals),
+#                  model_names)
+#        p.close()
+#        p.join()
+#    combine_galaxy_table_metadata()
     with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
         p.map(coadd_phases, model_names)
         p.map(do_cov, model_names)
