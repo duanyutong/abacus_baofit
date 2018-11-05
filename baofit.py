@@ -10,7 +10,8 @@ import traceback
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/emulator_1100box_planck-recon-test/' # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-recon/' # this is the save directory
+savefolder = '2Dbaofits/'
 # datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
 zb = '' # zb = 'zbin3_' # change number to change zbin
@@ -183,7 +184,7 @@ class baofit3D_ellFull_1cov:
             return chi_min
         modl = []
         if wo == 'y':
-            fo = open(Hdir+'2Dbaofits/'+fw+'-ep0-ximod.dat','w')
+            fo = open(Hdir+savefolder+fw+'-ep0-ximod.dat','w')
         pv = []
         for i in range(0, int(self.nbin/2)):
             pv.append(self.xim[i]-BB*self.xia[i])
@@ -257,11 +258,14 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
     b.B0 = BB  # best fit B0 from prior used as B2 prior?
     b.Bp = Bp
     b.Bt = Bt
-    if not os.path.exists(os.path.join(Hdir+'2Dbaofits')):
-        os.makedirs(os.path.join(Hdir+'2Dbaofits'))
-        print('2Dbaofits folder DNE, created.')
-    fo = open(Hdir+'2Dbaofits/'+fout+'-arat-covchi.dat','w+')
-    fg = open(Hdir+'2Dbaofits/'+fout+'-arat-covchigrid.dat','w+')
+    if not os.path.exists(os.path.join(Hdir + savefolder)):
+        try:
+            os.makedirs(os.path.join(Hdir + savefolder))
+            print('2Dbaofits folder DNE, created.')
+        except OSError:
+            pass
+    fo = open(Hdir+savefolder+fout+'-arat-covchi.dat','w+')
+    fg = open(Hdir+savefolder+fout+'-arat-covchigrid.dat','w+')
 #     chim = 1000
     nar = int((armax-armin)/spar)
     nat = int((atmax-atmin)/spat)
@@ -335,8 +339,8 @@ def baofit(inputs):
         mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
         alrm, altm, chim = Xism_arat_1C_an(
             dv, invc, rl, mod, dvb, invcb, rlb, 
-            armin=0.995, armax=1.070, spar=0.0004,
-            atmin=1.000, atmax=1.035, spat=0.0004, fout = fout_tag)
+            armin=0.990, armax=1.04, spar=0.0004,
+            atmin=1.000, atmax=1.025, spat=0.0004, fout=fout_tag)
         print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
         return alrm, altm
     except Exception as E:

@@ -373,8 +373,7 @@ def do_subcross_count(model, mode='smu-post-recon-std',
         np.save(os.path.join(filedir, '{}-cross_{}-paircount-DD-{}.npy'
                              .format(model_name, linind, mode)),
                 DDnpy)
-        if use_shifted_randoms and 'post-recon' in mode and \
-                hasattr(model.mock, 'shifted_randoms'):
+        if use_shifted_randoms and hasattr(model.mock, 'shifted_randoms'):
             # calculate D2Rbox by brute force sampling, where
             # Rbox sample is homogeneous in volume of box
             # force float32 (a.k.a. single precision float in C)
@@ -421,12 +420,11 @@ def do_subcross_count(model, mode='smu-post-recon-std',
                         filedir, '{}-cross_{}_{}-paircount-RR-{}-sr.npy'
                         .format(model_name, linind, n, mode)),
                         RRnpy)
-        elif 'pre-recon' in mode:  # use_analytic_randoms
+        elif 'post' not in mode:  # use_analytic_randoms
             pass
         else:
-            raise ValueError('Post-reconstruction cross-correlation counting'
-                             ' requires shifted randoms for mode: {}'
-                             .format(mode))
+            raise ValueError('Post-reconstruction cross-correlation requires'
+                             ' shifted randoms for mode: {}'.format(mode))
 
 
 def do_subcross_correlation(linind, phase, r, model_name,
@@ -443,7 +441,7 @@ def do_subcross_correlation(linind, phase, r, model_name,
                             '{}-cross_{}-paircount-DD-{}-rebinned.txt'
                             .format(model_name, linind, mode)),
                DD, fmt=txtfmt)
-    if 'post-recon' in mode and use_shifted_randoms:
+    if use_shifted_randoms:
         DRnpy = np.load(os.path.join(filedir,
                                      '{}-cross_{}-paircount-DR-{}-sr.npy'
                                      .format(model_name, linind, mode)))
@@ -488,7 +486,7 @@ def do_subcross_correlation(linind, phase, r, model_name,
                     filedir, '{}-cross_{}-{}-{}-sr.txt'
                     .format(model_name, linind, tag, mode)),
                 output, fmt=txtfmt)
-    elif 'pre-recon' in mode:  # pre-recon covariance, use analytic randoms
+    elif 'post' not in mode:  # pre-recon covariance, use analytic randoms
         DR, RD, RR = analytic_random(1, 1, 1, 1, s_bins, mu_bins, L**3)
         for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
             np.savetxt(os.path.join(
@@ -507,8 +505,6 @@ def do_subcross_correlation(linind, phase, r, model_name,
                     filedir, '{}-cross_{}-{}-{}-ar.txt'
                     .format(model_name, linind, tag, mode)),
                 output, fmt=txtfmt)
-    else:
-        print('Mode error for: {}'.format(mode))
 
 
 def do_realisation(r, phase, model_name, overwrite=False,
@@ -516,8 +512,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                    do_pre_auto_fft=True, do_pre_cross=True,
                    do_recon_std=True, do_post_wp=True, do_post_cross=True,
                    do_recon_ite=True,
-                   do_pre_auto_corr=False,
-                   do_pre_cross_corr=True, do_post_cross_corr=False):
+                   do_pre_auto_corr=False, do_cross_corr=True):
 
     global halocat
     try:  # this helps catch exception in a worker thread of multiprocessing
@@ -527,7 +522,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
         gt_path = os.path.join(filedir, '{}-galaxy_table.csv'
                                .format(model_name))
         seed = phase*100 + r
-        if os.path.isfile(gt_path) and not overwrite:
+        if os.path.isfile(gt_path):
             temp = os.path.join(filedir, model_name)
             if len(glob(temp+'-auto-paircount-DD-smu-pre-recon.npy')) == 1:
                 do_pre_auto_smu = False
@@ -548,13 +543,10 @@ def do_realisation(r, phase, model_name, overwrite=False,
         if not np.any(flags):
             print('r = {}, all counting done,'.format(r))
             do_count = False
-        else:
-            do_count = True
         if do_count:  # everything within is counting, require loading halocat
             try:
                 assert halocat.ZD_Seed == phase
             except NameError or AssertionError:
-                print('Halocat mismatch. Reloading...')
                 halocat = make_halocat(phase)
                 process_rockstar_halocat(halocat, N_cut=N_cut)
             # all realisations in parallel, each model needs to be instantiated
@@ -597,44 +589,36 @@ def do_realisation(r, phase, model_name, overwrite=False,
                         '{}-z{}-{}-r{}.csv'
                         .format(model_name, redshift, phase, r)),
                     format='ascii.fast_csv', overwrite=True)
-            if do_pre_auto_smu:  # pre-recon auto-correlation pair-counting
+            # reconstruction prep work
+            m = np.zeros(len(gt))
+            arr = np.array([m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
+            arr.tofile(os.path.join(recon_temp_dir,
+                                    'gal_cat-{}.dat'.format(seed)),
+                       sep='')
+            subprocess.call(['python', './recon/read/read.py',
+                             str(phase), str(seed)])
+            if do_pre_auto_smu:  # pre-recon auto-correlation with pair-counting
                 print('r = {}, pre-recon pair-counting...'.format(r))
                 do_auto_count(model, mode='smu-pre-recon')
                 do_auto_count(model, mode='wp-pre-recon')
-            if do_pre_cross:
-                print('r = {}, now counting for pre-recon x-corr...'.format(r))
-                do_subcross_count(model, mode='smu-pre-recon',
-                                  use_shifted_randoms=False)
-            if do_pre_auto_fft or do_recon_std or do_recon_ite:
-                # reconstruction prep work
-                m = np.zeros(len(gt))
-                arr = np.array(
-                        [m, gt['x'], gt['y'], gt['z']]).T.astype(np.float32)
-                arr.tofile(os.path.join(recon_temp_dir,
-                                        'gal_cat-{}.dat'.format(seed)),
-                           sep='')
-                subprocess.call(['python', './recon/read/read.py',
-                                 str(phase), str(seed)])
-            if do_pre_auto_fft:  # pre-recon auto-correlation with FFTcorr
+            if do_fftcorr_pre_recon:  # pre-recon auto-correlation with FFTcorr
                 print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '0', str(seed), model_name, filedir])
-            # check that reconstructed catalogue exists
-            if do_recon_std or ((do_post_cross or do_post_wp) and
+            # check reconstructed catalogue exists
+            if do_recon_std or ((do_cross_count or do_wp) and
                                 not os.path.isfile(os.path.join(
                     recon_temp_dir, 'file_D-{}_rec'.format(seed)))):
                 print('r = {}, now applying standard recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '1', str(seed), model_name, filedir])
-            if do_post_cross or do_post_wp:  # load shifted D, R samples
-                print('r = {}, reading shifted D, R samples...'.format(r))
+            if do_cross_count or do_wp:  # load shifted D, R samples
+                print('r = {}, reading shifted D, R samples for cov...'.format(r))
                 D = np.float32(np.fromfile(  # read shifted data
-                        os.path.join(recon_temp_dir,
-                                     'file_D-{}_rec'.format(seed)),
+                        os.path.join(recon_temp_dir, 'file_D-{}_rec'.format(seed)),
                         dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
                 R = np.float32(np.fromfile(  # read shifted randoms
-                        os.path.join(recon_temp_dir,
-                                     'file_R-{}_rec'.format(seed)),
+                        os.path.join(recon_temp_dir, 'file_R-{}_rec'.format(seed)),
                         dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
                 # read.cpp re-wraps data above 550 to negative pos
                 D[D < 0] += 1100  # undo wrapping by read.cpp for data_shifted
@@ -648,11 +632,11 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                        replace=False)
                 model.mock.shifted_randoms = R[idx, :]
                 model.mock.reconstructed = True
-            if do_post_wp:
+            if do_wp:
                 # do_auto_correlation(model, mode='smu-post-recon-std',
                 #                     use_grid_randoms=False)
                 do_auto_count(model, mode='wp-post-recon-std')
-            if do_post_cross:
+            if do_cross_count:
                 print('r = {}, now calculating x-corr covariance...'.format(r))
                 do_subcross_count(model, mode='smu-post-recon-std',
                                   use_shifted_randoms=True)
@@ -664,15 +648,9 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                  '2', str(seed), model_name, filedir])
         if do_pre_auto_corr:
             do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
-        # cross correlation calculation after pair-counting
-        with closing(MyPool(processes=N_concurrent_reals,
-                            maxtasksperchild=1)) as p:
-            if do_pre_cross_corr:
-                p.map(partial(do_subcross_correlation, model_name=model_name,
-                              phase=phase, r=r, mode='smu-pre-recon',
-                              use_shifted_randoms=True),
-                      range(N_sub**3))
-            if do_post_cross_corr:
+        if do_cross_corr:
+            with closing(MyPool(processes=N_concurrent_reals,
+                                maxtasksperchild=1)) as p:
                 p.map(partial(do_subcross_correlation, model_name=model_name,
                               phase=phase, r=r, mode='smu-post-recon-std',
                               use_shifted_randoms=True),
@@ -713,16 +691,17 @@ def coadd_realisations(model_name, phase, N_reals):
     print('Coadding {} realisations for phase {}, model {}...'
           .format(N_reals, phase, model_name))
     for fn in coadd_filenames:
+        print('Coadding', fn)
         temp = os.path.join(save_dir, sim_name, 'z{}-r*'.format(redshift),
                             model_name+'-auto*'+fn+'*')
         paths = glob(temp)
         try:
             assert len(paths) == N_reals
-        except AssertionError as E:
+        except AssertionError:
             print('Number of files to be co-added does not equal to N_reals. '
                   'Glob template is: ', temp)
             print('Paths found:', paths)
-            raise E
+            return False
         corr_list = [np.loadtxt(path) for path in paths]
         coadd, error = coadd_correlation(corr_list)
         np.savetxt(os.path.join(
@@ -783,8 +762,7 @@ def convert_recon_correlation(model_name, phases=range(16)):
     with the correct scaling, taking into account b = 2.23
 
     '''
-    print('Converting recon N and R to multipoles for model {}...'
-          .format(model_name))
+
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
@@ -894,31 +872,30 @@ def run_baofit_parallel(baofit_phases=range(16)):
                            'z{}'.format(redshift))
     list_of_inputs = []
     for model_name in model_names:
-        # for i in range(3):  # debug
-        for i in [0]:
-            xi_type = coadd_filenames[5+2*i][10:]
-            for phase in baofit_phases:  # list of inputs for parallelisation
-                path_xi_0 = os.path.join(
+        i = 0
+        xi_type = coadd_filenames[5+2*i][10:]
+        for phase in baofit_phases:  # list of inputs for parallelisation
+            path_xi_0 = os.path.join(
+                filedir,
+                '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
+                .format(model_name, xi_type, phase))
+            path_xi_2 = os.path.join(
+                filedir,
+                '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
+                .format(model_name, xi_type, phase))
+            if 'pre-recon' in xi_type:
+                path_cov = os.path.join(
                     filedir,
-                    '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, xi_type, phase))
-                path_xi_2 = os.path.join(
+                    '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
+                    .format(model_name))
+            elif 'post-recon' in xi_type:
+                path_cov = os.path.join(
                     filedir,
-                    '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, xi_type, phase))
-                if 'pre-recon' in xi_type:
-                    path_cov = os.path.join(
-                        filedir,
-                        '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
-                        .format(model_name))
-                elif 'post-recon' in xi_type:
-                    path_cov = os.path.join(
-                        filedir,
-                        '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
-                        .format(model_name))
-                fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
-                list_of_inputs.append(
-                    [path_xi_0, path_xi_2, path_cov, fout_tag])
+                    '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
+                    .format(model_name))
+            fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
+            list_of_inputs.append(
+                [path_xi_0, path_xi_2, path_cov, fout_tag])
     with closing(MyPool(processes=N_threads*N_concurrent_reals,
                         maxtasksperchild=1)) as p:
         p.map(baofit, list_of_inputs)
@@ -928,37 +905,32 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
 if __name__ == "__main__":
 
-    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
-                                 redshift, cosmology)
-    for phase in phases:
-        halocat = make_halocat(phase)
-        process_rockstar_halocat(halocat, N_cut=N_cut)
-        for model_name in model_names:
-            print('-*\nWorking on {} realisations of phase {}, model {}...'
-                  .format(N_reals, phase, model_name))
-            with closing(MyPool(processes=N_concurrent_reals,
-                                maxtasksperchild=1)) as p:
-                p.map(partial(
-                        do_realisation, phase=phase, model_name=model_name,
-                        overwrite=True,
-                        do_pre_auto_smu=False,
-                        do_pre_auto_fft=False, do_pre_cross=True,
-                        do_recon_std=False, do_post_wp=False,
-                        do_post_cross=False, do_recon_ite=True,
-                        do_pre_auto_corr=False,
-                        do_pre_cross_corr=True, do_post_cross_corr=False),
-                      range(N_reals))
-            p.close()
-            p.join()
-            print('--\nPool closed cleanly for model {}.\n--'
-                  .format(model_name))
-        with closing(MyPool(processes=len(phases), maxtasksperchild=1)) as p:
-            p.map(partial(coadd_realisations, phase=phase, N_reals=N_reals),
-                  model_names)
-    combine_galaxy_table_metadata()
-    with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
-        p.map(coadd_phases, model_names)
-        p.map(do_cov, model_names)
-        p.map(convert_recon_correlation, model_names)
+#    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
+#                                 redshift, cosmology)
+#    for phase in phases:
+#        halocat = make_halocat(phase)
+#        process_rockstar_halocat(halocat, N_cut=N_cut)
+#        for model_name in model_names:
+#            print('-*\nWorking on {} realisations of phase {}, model {}...'
+#                  .format(N_reals, phase, model_name))
+#            with closing(MyPool(processes=N_concurrent_reals,
+#                                maxtasksperchild=1)) as p:
+#                p.map(partial(do_realisation,
+#                              phase=phase, model_name=model_name,
+#                              overwrite=False, do_count=True,
+#                              do_auto_corr=True, do_subcross_corr=True),
+#                      range(N_reals))
+#            p.close()
+#            p.join()
+#            print('--\nPool closed cleanly for model {}.\n--'
+#                  .format(model_name))
+#            coadd_realisations(model_name, phase, N_reals)
+#    combine_galaxy_table_metadata()
+#    with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
+#        p.map(coadd_phases, model_names)
+#        p.map(do_cov, model_names)
+#        p.map(convert_recon_correlation, model_names)
+#    p.join()
+#    p.close()
 
     run_baofit_parallel(baofit_phases=phases)
