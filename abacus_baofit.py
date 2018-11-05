@@ -894,8 +894,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
                            'z{}'.format(redshift))
     list_of_inputs = []
     for model_name in model_names:
-        # for i in range(3):  # debug
-        for i in [0]:
+        for i in range(3):  # debug
             xi_type = coadd_filenames[5+2*i][10:]
             for phase in baofit_phases:  # list of inputs for parallelisation
                 path_xi_0 = os.path.join(
