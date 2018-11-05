@@ -240,7 +240,7 @@ def N_sat_mean(M, param_dict):
     # numpy does not like fractional power of a negative number
     # if base < 0, should get 0 probability anyways
     base = (M - kappa * Mcut) / M1
-    nsm = ncm * np.power(base * (base > 0), alpha)
+    nsm = ncm * np.power(base * (base >= 0), alpha)
     return nsm
 
 
