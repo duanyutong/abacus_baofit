@@ -70,7 +70,7 @@ s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0  # for counting
 n_mu_bins = mu_bins.size-1
 pi_max = 60  # for counting
-pi_bins = rp_bins = np.arange(0, pi_max+step_s_bins, step_s_bins)
+pi_bins = rp_bins = np.arange(0, pi_max+1, 1)
 
 # %% fixed catalogue parameters
 prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
@@ -282,7 +282,7 @@ def do_auto_count(model, mode='smu-pre-recon'):
                       output_savg=True, c_api_timer=False)
     elif 'rppi' in mode:  # also returns wp in addition to counts
         DDnpy = DDrppi(1, N_threads, pi_max, rp_bins, x, y, z,
-                       period=True, verbose=False, boxsize=L,
+                       periodic=True, verbose=False, boxsize=L,
                        output_rpavg=True, c_api_timer=False)
     else:
         print('Bad mode: {}'.format(mode))
@@ -320,6 +320,7 @@ def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
                                     .format(model_name, tag, mode)),
                        output, fmt=txtfmt)
     elif 'rppi' in mode:  # no rebinning necessary
+        # even for post-recon, rppi and wp are calculated with analytic randoms
         DR_ar, _, RR_ar = analytic_random(1, 1, 1, 1, L, mode='rppi',
                                           rp_bins=rp_bins, pi_bins=pi_bins)
         DD = DDnpy['DD']
@@ -669,6 +670,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                        'z{}-r{}'.format(redshift, r),
                                        '{}-galaxy_table-post-recon-std.csv'
                                        .format(model_name))
+                print('r = {}, saving shifted galaxy table...'.format(r))
                 gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
                 # randomly choose a 10 x ND subset of shited random sample
                 print('r = {}, randomly choosing shifted randoms...'.format(r))
@@ -719,7 +721,9 @@ def do_realisation(r, phase, model_name, overwrite=False,
 
 
 coadd_filenames = [  # coadd_realisations
-    'wp-pre-recon', 'wp-post-recon-std', 'xi-smu-pre-recon-ar',
+    'wp-pre-recon', 'wp-post-recon-std',
+    'xi-rppi-pre-recon-ar', 'xi-rppi-post-recon-std-ar',
+    'xi-smu-pre-recon-ar',
     'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
     'fftcorr_N-pre-recon-15.0_hmpc',
     'fftcorr_R-pre-recon-15.0_hmpc',
@@ -771,14 +775,12 @@ def coadd_phases(model_name, coadd_phases=range(16)):
                            'z{}'.format(redshift))
     if not os.path.exists(filedir):
         os.makedirs(filedir)
-    coadd_filenames = ['fftcorr_N-post-recon-ite-15.0_hmpc',
-                       'fftcorr_R-post-recon-ite-15.0_hmpc']
     for fn in coadd_filenames:
         temp = os.path.join(
             save_dir,
             '{}_{:02}-[0-9]*'.format(sim_name_prefix, cosmology),
             'z{}'.format(redshift), model_name+'-auto*'+fn+'*coadd*')
-        paths = glob(temp)
+        paths = glob(temp)  # co-add all boxes together
         try:
             assert len(paths) == len(coadd_phases)
         except AssertionError as E:
@@ -828,14 +830,14 @@ def convert_recon_correlation(model_name, phases=range(16)):
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
     for i in range(3):
-        fn = coadd_filenames[5+2*i][10:]
+        fn = coadd_filenames[7+2*i][10:]
         for phase in phases:
             N = np.loadtxt(os.path.join(
                     filedir, '{}-auto-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, coadd_filenames[5+2*i], phase)))
+                    .format(model_name, coadd_filenames[7+2*i], phase)))
             R = np.loadtxt(os.path.join(
                     filedir, '{}-auto-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, coadd_filenames[6+2*i], phase)))
+                    .format(model_name, coadd_filenames[7+2*i], phase)))
             assert np.all(N[:, 1] == R[:, 1])
             r = N[:, 1]
             xi_0 = N[:, 3] / R[:, 3] * np.square(galaxy_bias)
@@ -933,9 +935,9 @@ def run_baofit_parallel(baofit_phases=range(16)):
                            'z{}'.format(redshift))
     list_of_inputs = []
     for model_name in model_names:
-        # for i in range(3):  # debug
-        for i in [0]:
-            xi_type = coadd_filenames[5+2*i][10:]
+        # for i in [0]:  # cebug
+        for i in range(3):
+            xi_type = coadd_filenames[7+2*i][10:]
             for phase in baofit_phases:  # list of inputs for parallelisation
                 path_xi_0 = os.path.join(
                     filedir,
@@ -1004,8 +1006,8 @@ if __name__ == "__main__":
 #    combine_galaxy_table_metadata()
     with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
         p.map(coadd_phases, model_names)
-        p.map(do_cov, model_names)
-        p.map(convert_recon_correlation, model_names)
-    p.close()
-    p.join()
-    run_baofit_parallel(baofit_phases=phases)
+#        p.map(do_cov, model_names)
+#        p.map(convert_recon_correlation, model_names)
+#    p.close()
+#    p.join()
+#    run_baofit_parallel(baofit_phases=phases)
