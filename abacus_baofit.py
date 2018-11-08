@@ -69,8 +69,9 @@ mu_bins = np.arange(0, 1 + step_mu_bins, step_mu_bins)
 s_bins_counts = np.arange(0, 151, 1)  # always count with s bin size 1
 mu_max = 1.0  # for counting
 n_mu_bins = mu_bins.size-1
-pi_max = 60  # for counting
-pi_bins = rp_bins = np.arange(0, pi_max+1, 1)
+pi_max = 120  # for counting
+pi_bins = np.arange(0, pi_max+1, 1)
+rp_bins = pi_bins
 
 # %% fixed catalogue parameters
 prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
@@ -321,14 +322,17 @@ def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
                        output, fmt=txtfmt)
     elif 'rppi' in mode:  # no rebinning necessary
         # even for post-recon, rppi and wp are calculated with analytic randoms
-        DR_ar, _, RR_ar = analytic_random(1, 1, 1, 1, L, mode='rppi',
+        # counts not normalised becuase we are using corrfunc for wp conversion
+        ND = np.median(np.around(DD['npairs'] / DD['DD']))
+        DR_ar, _, RR_ar = analytic_random(ND, ND, ND, ND, L, mode='rppi',
                                           rp_bins=rp_bins, pi_bins=pi_bins)
-        DD = DDnpy['DD']
+
+        DD = DDnpy['npairs'].reshape(len(rp_bins)-1, -1)
         xi_rppi = ls_estimator(DD, DR_ar, DR_ar, RR_ar, RR_ar)
         wp = convert_rp_pi_counts_to_wp(
-            1, 1, 1, 1, DD.flatten(), DR_ar.flatten(), DR_ar.flatten(),
+            ND, ND, ND, ND, DD.flatten(), DR_ar.flatten(), DR_ar.flatten(),
             RR_ar.flatten(), len(rp_bins)-1, pi_max, estimator='LS')
-        wp_txt = np.vstack([s_bins_centre, wp]).T
+        wp_txt = np.vstack([(rp_bins[:-1] + rp_bins[1:])/2, wp]).T
         np.savetxt(os.path.join(filedir, '{}-auto-xi-{}-ar.txt'
                                 .format(model_name, mode)),
                    xi_rppi, fmt=txtfmt)
@@ -579,6 +583,9 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                'z{}-r{}'.format(redshift, r))
         gt_path = os.path.join(filedir, '{}-galaxy_table.csv'
                                .format(model_name))
+        gt_recon_path = os.path.join(filedir,
+                                     '{}-galaxy_table-post-recon-std.csv'
+                                     .format(model_name))
         seed = phase*100 + r
         if os.path.isfile(gt_path) and not overwrite:
             temp = os.path.join(filedir, model_name)
@@ -590,7 +597,8 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 do_pre_auto_fft = False
             if len(glob(temp+'-cross_*-DD-smu-pre-recon.npy')) == 27:
                 do_pre_cross = False
-            if len(glob(temp+'-auto-fftcorr_N-post-recon-std*.txt')) == 1:
+            if len(glob(temp+'-auto-fftcorr_N-post-recon-std*.txt')) == 1 \
+                    and os.path.isfile(gt_recon_path):
                 do_recon_std = False
             if len(glob(temp+'-auto-*-DD-rppi-post-recon-std*.npy')) == 1:
                 do_post_auto_rppi = False
@@ -622,9 +630,10 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                    gt_path=reuse_galaxies * gt_path)
             gt = model.mock.galaxy_table
             if do_pre_auto_smu:  # pre-recon auto-correlation pair-counting
-                print('r = {}, pre-recon pair-counting...'.format(r))
+                print('r = {}, pre-recon smu pair-counting...'.format(r))
                 do_auto_count(model, mode='smu-pre-recon')
             if do_pre_auto_rppi:
+                print('r = {}, pre-recon rppi pair-counting...'.format(r))
                 do_auto_count(model, mode='rppi-pre-recon')
             if do_pre_cross:
                 print('r = {}, now counting for pre-recon x-corr...'.format(r))
@@ -651,27 +660,31 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 print('r = {}, now applying standard recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '1', str(seed), model_name, filedir])
-            if do_post_cross or do_post_auto_rppi:  # load shifted D, R samples
-                print('r = {}, reading shifted D, R samples...'.format(r))
-                D = np.float32(np.fromfile(  # read shifted data
-                        os.path.join(recon_temp_dir,
-                                     'file_D-{}_rec'.format(seed)),
-                        dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
+            if do_post_cross or do_post_auto_rppi:
+                if os.path.isfile(gt_recon_path):
+                    model.mock.galaxy_table = gt = table.Table.read(
+                        gt_path, format='ascii.fast_csv',
+                        fast_reader={'parallel': True,
+                                     'use_fast_converter': False})
+                else:  # load shifted D, R samples
+                    print('r = {}, reading shifted D samples...'.format(r))
+                    D = np.float32(np.fromfile(  # read shifted data
+                            os.path.join(recon_temp_dir,
+                                         'file_D-{}_rec'.format(seed)),
+                            dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
+                    # read.cpp re-wraps data above 550 to negative pos
+                    D[D < 0] += 1100  # undo wrapping by read.cpp
+                    # write shifted positions to model galaxy table and save it
+                    gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]
+                    print('r = {}, saving shifted galaxy table...'.format(r))
+                    gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
+            if do_post_cross and not os.path.isfile(gt_recon_path):
+                print('r = {}, reading shifted R samples...'.format(r))
                 R = np.float32(np.fromfile(  # read shifted randoms
                         os.path.join(recon_temp_dir,
                                      'file_R-{}_rec'.format(seed)),
                         dtype=np.float64)[8:].reshape(-1, 4))[:, :3]
-                # read.cpp re-wraps data above 550 to negative pos
-                D[D < 0] += 1100  # undo wrapping by read.cpp for data_shifted
                 R[R < 0] += 1100
-                # write shifted positions to model galaxy table and save it
-                gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]
-                gt_path = os.path.join(save_dir, sim_name,
-                                       'z{}-r{}'.format(redshift, r),
-                                       '{}-galaxy_table-post-recon-std.csv'
-                                       .format(model_name))
-                print('r = {}, saving shifted galaxy table...'.format(r))
-                gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
                 # randomly choose a 10 x ND subset of shited random sample
                 print('r = {}, randomly choosing shifted randoms...'.format(r))
                 idx = np.random.choice(np.arange(R.shape[0]),
@@ -699,7 +712,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
             do_auto_correlation(model_name, phase, r,
                                 mode='rppi-post-recon-std')
         # cross correlation calculation after pair-counting
-        with closing(MyPool(processes=N_threads*N_concurrent_reals,
+        with closing(MyPool(processes=N_threads,
                             maxtasksperchild=1)) as p:
             if do_pre_cross_corr:
                 p.map(partial(do_subcross_correlation, model_name=model_name,
@@ -979,18 +992,18 @@ if __name__ == "__main__":
                   .format(N_reals, phase, model_name))
             with closing(MyPool(processes=N_concurrent_reals,
                                 maxtasksperchild=1)) as p:
-                p.map(partial(do_galaxy_table,
-                              phase=phase, model_name=model_name,
-                              overwrite=False),
-                      range(N_reals))
+#                p.map(partial(do_galaxy_table,
+#                              phase=phase, model_name=model_name,
+#                              overwrite=False),
+#                      range(N_reals))
                 p.map(partial(
                         do_realisation, phase=phase, model_name=model_name,
                         overwrite=True,
                         do_pre_auto_smu=False, do_pre_auto_rppi=True,
-                        do_pre_auto_fft=False, do_pre_cross=True,
+                        do_pre_auto_fft=False, do_pre_cross=False,
                         do_recon_std=True, do_post_auto_rppi=True,
                         do_post_cross=False, do_recon_ite=False,
-                        do_pre_auto_corr=False, do_post_auto_corr=True,
+                        do_pre_auto_corr=True, do_post_auto_corr=True,
                         do_pre_cross_corr=False, do_post_cross_corr=False),
                       range(N_reals))
             p.close()
