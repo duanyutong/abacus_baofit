@@ -152,6 +152,7 @@ def process_rockstar_halocat(halocat, N_cut=70):
           'Smallest subsamp_len = {}.'
           .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab),
                   htab['halo_subsamp_len'].min()))
+    return halocat
 
 
 def fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
@@ -317,7 +318,7 @@ def do_rsd(z, vz, redshift, cosmology, period):
 #     return rankings
 
 
-def process_particle_props(pt, h, halo_m_prop='halo_mvir',
+def process_particle_props(pt, h, halo_m_prop='halo_mvir', perihelion=False,
                            max_iter=10, precision=0.1):
 
     # add host_centric_distance for all particles for bias s
@@ -342,45 +343,48 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir',
     pt['v_rad'] = np.sum(np.multiply(v_pec, r_rel_hat), axis=1)  # dot prod
     pt['v_tan'] = np.sqrt(np.square(pt['v_pec']) - np.square(pt['v_rad']))
     # calculate perihelion distance for bias s_p, note h factors
-    G_N = 6.674e-11  # G newton in m3, s-2, kg-1
-    M_sun = 1.98855e30  # solar mass in kg
-    kpc = 3.0857e19  # kpc in meters
-    M = pt[halo_m_prop] / h  # halo mass in Msun
-    c = pt['halo_nfw_conc']  # nfw concentration, dimensionless
-    r0 = pt['r_centric'] / h  # distance to halo centre in kpc
-    Rs = pt['halo_klypin_rs'] / h  # halo scale radius in kpc
-    vr2, vt2 = np.square(pt['v_rad']), np.square(pt['v_tan'])
-    alpha = G_N*M*M_sun/1e6/kpc/(np.log(1+c) - c/(1+c))  # kpc (km/s)^2
-    # initial X = 1, set first iteration value by hand
-    X2 = np.sqrt(vt2/(vr2 + vt2))  # has NaN when v_pec = 0
-    X2[np.isnan(X2)] = 1  # set nan values to 1 to restore r_0 = r_min
-    i = 0
-    print('Calculating X2 for perihelion ranking...')
-    for i in range(max_iter):
-        i = i + 1
-        Xold = np.sqrt(X2)
-        Xold[Xold == 0] = 1  # for cases where X=0, this ensures Xnew = 0
-        X2 = vt2 / (vt2 + vr2 +
-                    2*alpha/r0*(np.log(1+Xold*r0/Rs)/Xold - np.log(1+r0/Rs)))
-        # set if v_pec = v_rad = v_tan = 0, then X2 = nan, but it should be 1
-        X2[np.isnan(X2)] = 1  # set to 1 manually for stationary particles
-        Xnew = np.sqrt(X2)
-        # error analysis
-        ferr = np.abs(Xold - Xnew) / Xnew  # for Xnew = 0, this results in inf
-        ferr[np.isinf(ferr)] = 0
-        str_template = ('Iteration {:2d} fractional error: {:6.5f} '
-                        '+/- {:6.5f}, max {:6.5f}.'
-                        .format(i, np.mean(ferr), np.std(ferr), np.max(ferr)))
-        if np.max(ferr) < precision:
-            print(str_template + ' Precision reached.')
-            break
-        elif i == max_iter:
-            print(str_template + ' Maximum iterations reached.')
-            break
-        else:
-            pass  # print(str_template)
-
-    pt['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
+    if perihelion:
+        G_N = 6.674e-11  # G newton in m3, s-2, kg-1
+        M_sun = 1.98855e30  # solar mass in kg
+        kpc = 3.0857e19  # kpc in meters
+        M = pt[halo_m_prop].data / h  # halo mass in Msun
+        c = pt['halo_nfw_conc'].data  # nfw concentration, dimensionless
+        r0 = pt['r_centric'].data / h  # distance to halo centre in kpc
+        Rs = pt['halo_klypin_rs'].data / h  # halo scale radius in kpc
+        vr2, vt2 = np.square(pt['v_rad'].data), np.square(pt['v_tan'].data)
+        alpha = G_N*M*M_sun/1e6/kpc/(np.log(1+c) - c/(1+c))  # kpc (km/s)^2
+        # initial X = 1, set first iteration value by hand
+        X2 = np.sqrt(vt2/(vr2 + vt2))  # has NaN when v_pec = 0
+        X2[np.isnan(X2)] = 1  # set nan values to 1 to restore r_0 = r_min
+        i = 0
+        print('Calculating X2 for perihelion ranking...')
+        for i in range(max_iter):
+            i = i + 1
+            Xold = np.sqrt(X2)
+            Xold[Xold == 0] = 1  # for cases where X=0, this ensures Xnew = 0
+            X2 = vt2 / (vt2 + vr2 +
+                        2*alpha/r0*(np.log(1+Xold*r0/Rs)/Xold
+                                    - np.log(1+r0/Rs)))
+            # if v_pec = v_rad = v_tan = 0, then X2 = nan, but it should be 1
+            X2[np.isnan(X2)] = 1  # set to 1 manually for stationary particles
+            Xnew = np.sqrt(X2)
+            # error analysis
+            ferr = np.abs(Xold - Xnew) / Xnew  # for Xnew = 0, results in inf
+            ferr[np.isinf(ferr)] = 0
+            str_template = (
+                    'Iteration {:2d} fractional error: {:6.5f} '
+                    '+/- {:6.5f}, max {:6.5f}.'
+                    .format(i, np.mean(ferr), np.std(ferr), np.max(ferr)))
+            if np.max(ferr) < precision:
+                print(str_template + ' Precision reached.')
+                break
+            elif i == max_iter:
+                print(str_template + ' Maximum iterations reached.')
+                break
+            else:
+                pass  # print(str_template)
+        pt['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
+    return pt
 
 
 def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
@@ -778,7 +782,8 @@ def make_galaxies(model, add_rsd=True):
         pt[col] = np.repeat(ht[col], ht['halo_subsamp_len'].astype(np.int64))
     # calculate additional particle quantities for decorations
     print('r = {}, processing particle table properties...'.format(model.r))
-    process_particle_props(pt, h, halo_m_prop=model.halo_m_prop)
+    pt = process_particle_props(pt, h, halo_m_prop=model.halo_m_prop,
+                                perihelion=(model.param_dict['s_p'] != 0))
     # particle table complete. onto satellite generation
     # calculate satellite probablity and generate random numbers
     pt['N_sat_rand'] = np.random.random(N_particles)
