@@ -34,7 +34,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon'  # 'z0.5'
+tagout = 'recon-test'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -47,8 +47,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n',
                'gen_vel1',  'gen_vel2']
-model_names = ['gen_vel2']
-N_reals = 12  # number of realisations for an HOD
+model_names = ['gen_base1']
+N_reals = 4  # number of realisations for an HOD
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
 N_threads = 8  # number of threads for a single realisation
@@ -211,7 +211,7 @@ def coadd_correlation(corr_list):
     input is a list of xi or wp samples
     array in the list is of shape (:, 2), and 1st column is r
     '''
-    print('Length of items being coadded: ', len(corr_list))
+    print('Number of samples being coadded: ', len(corr_list))
     arr = np.array(corr_list)
     coadd = np.mean(arr, axis=0)
     err = np.std(arr, axis=0)
@@ -378,6 +378,10 @@ def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
                     .format(model_name, n, mode)))
             if 'smu' in mode:
                 RR, _ = rebin_smu_counts(RRnpy, 'RR')
+                np.savetxt(os.path.join(
+                        filedir, '{}-auto_{}-paircount-RR-{}-sr_rebinned.txt'
+                        .format(model_name, n, mode)),
+                    RR, fmt=txtfmt)
             elif 'rppi' in mode:
                 RR = RRnpy['RR']
             RR_list.append(RR)
@@ -392,7 +396,6 @@ def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
                                 '{}-auto-paircount-RR-{}-{}.txt'
                                 .format(model_name, mode, rand_type)),
                    RR_ar, fmt=txtfmt)
-
     xi = ls_estimator(DD, DR, DR, RR, RR_ar)
     if 'smu' in mode:
         xi_0 = tpcf_multipole(xi, mu_bins, order=0)
@@ -521,7 +524,17 @@ def do_subcross_correlation(linind, phase, r, model_name,
                             '{}-cross_{}-paircount-DD-{}-rebinned.txt'
                             .format(model_name, linind, mode)),
                DD, fmt=txtfmt)
-    if 'post-recon' in mode:
+    if 'pre-recon' in mode:  # pre-recon covariance, use analytic randoms
+        DR, RD, RR = analytic_random(1, 1, 1, 1, L, mode='smu',
+                                     s_bins=s_bins, mu_bins=mu_bins)
+        for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
+            np.savetxt(os.path.join(
+                    filedir, '{}-cross_{}-paircount-{}-{}-ar.txt'
+                    .format(model_name, linind, tag, mode)),
+                output, fmt=txtfmt)
+        xi_smu = ls_estimator(DD, DR, RD, RR, RR)
+        rand_type = 'ar'
+    elif 'post-recon' in mode:
         DRnpy = np.load(os.path.join(filedir,
                                      '{}-cross_{}-paircount-DR-{}-sr.npy'
                                      .format(model_name, linind, mode)))
@@ -550,24 +563,12 @@ def do_subcross_correlation(linind, phase, r, model_name,
         # use analytic RR as denominator in LS estimator, numerator is shifted
         _, _, RR_ar = analytic_random(1, 1, 1, 1, L, mode='smu',
                                       s_bins=s_bins, mu_bins=mu_bins)
-        np.savetxt(os.path.join(
-                filedir,
-                '{}-cross_{}-paircount-RR-{}-ar.txt'
-                .format(model_name, linind, mode)),
-            RR_ar, fmt=txtfmt)
+        np.savetxt(os.path.join(filedir, '{}-cross_{}-paircount-RR-{}-ar.txt'
+                                .format(model_name, linind, mode)),
+                   RR_ar, fmt=txtfmt)
         assert DD.shape == DR.shape == RD.shape == RR.shape == RR_ar.shape
         xi_smu = ls_estimator(DD, DR, RD, RR, RR_ar)
-        filename = '{}-cross_{}-{}-{}-sr.txt'
-    elif 'pre-recon' in mode:  # pre-recon covariance, use analytic randoms
-        DR, RD, RR = analytic_random(1, 1, 1, 1, L, mode='smu',
-                                     s_bins=s_bins, mu_bins=mu_bins)
-        for output, tag in zip([DR, RD, RR], ['DR', 'RD', 'RR']):
-            np.savetxt(os.path.join(
-                    filedir, '{}-cross_{}-paircount-{}-{}-ar.txt'
-                    .format(model_name, linind, tag, mode)),
-                output, fmt=txtfmt)
-        xi_smu = ls_estimator(DD, DR, RD, RR, RR)
-        filename = '{}-cross_{}-{}-{}-ar.txt'
+        rand_type = 'sr'
     else:
         print('Mode error for: {}'.format(mode))
     # calculate cross-correlation from counts using ls estimator
@@ -578,8 +579,8 @@ def do_subcross_correlation(linind, phase, r, model_name,
     for output, tag in zip([xi_smu, xi_0_txt, xi_2_txt],
                            ['xi', 'xi_0', 'xi_2']):
         np.savetxt(os.path.join(
-                filedir,
-                filename.format(model_name, linind, tag, mode)),
+                filedir, '{}-cross_{}-{}-{}-{}.txt'
+                .format(model_name, linind, tag, mode, rand_type)),
             output, fmt=txtfmt)
 
 
@@ -679,7 +680,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 do_pre_auto_rppi = False
             if len(glob(temp+'-auto-fftcorr_N-pre-recon*.txt')) == 1:
                 do_pre_auto_fft = False
-            if len(glob(temp+'-cross_*-DD-smu-pre-recon.npy')) == 27:
+            if len(glob(temp+'-cross_*-DD-smu-pre-recon*.npy')) == 27:
                 do_pre_cross = False
             if len(glob(temp+'-auto-fftcorr_N-post-recon-std*.txt')) == 1 \
                     and os.path.isfile(gt_recon_path) \
@@ -824,9 +825,9 @@ coadd_filenames = [  # coadd_realisations
     'xi-smu-pre-recon-ar', 'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
     'xi-rppi-pre-recon-ar', 'xi-rppi-post-recon-std-sr',
     'wp-pre-recon-ar', 'wp-post-recon-std-sr',
-    'fftcorr_N-pre-recon-15.0_hmpc', 'fftcorr_R-pre-recon-15.0_hmpc',
-    'fftcorr_N-post-recon-std-15.0_hmpc', 'fftcorr_R-post-recon-std-15.0_hmpc',
-    'fftcorr_N-post-recon-ite-15.0_hmpc', 'fftcorr_R-post-recon-ite-15.0_hmpc']
+    'fft*_N-pre-recon-15.0_hmpc', 'fft*_R-pre-recon-15.0_hmpc',
+    'fft*_N-post-recon-std-15.0_hmpc', 'fft*_R-post-recon-std-15.0_hmpc',
+    'fft*_N-post-recon-ite-15.0_hmpc', 'fft*_R-post-recon-ite-15.0_hmpc']
 
 
 def coadd_realisations(model_name, phase, N_reals):
@@ -881,7 +882,6 @@ def coadd_phases(model_name, coadd_phases=range(16)):
             print('paths are:', paths)
             raise E
         corr_list = [np.loadtxt(path) for path in paths]
-        print('dtype is', corr_list[0].dtype)
         coadd, error = coadd_correlation(corr_list)
         np.savetxt(os.path.join(
                 filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)),
@@ -889,8 +889,7 @@ def coadd_phases(model_name, coadd_phases=range(16)):
         np.savetxt(os.path.join(
                 filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
             error, fmt=txtfmt)
-        print('saved to', os.path.join(
-                filedir, '{}-auto-{}-coadd.txt'.format(model_name, fn)))
+        print('Producing delete-1 jackknife samples for model {}...')
         for phase in coadd_phases:  # jackknife delete-one
             jk_list = corr_list[:phase] + corr_list[phase+1:]
             assert len(jk_list) == len(coadd_phases) - 1
@@ -963,29 +962,26 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
     #     xi_list = [np.loadtxt(path)[:, 1] for path in paths]
 
     # calculate monoquad cov for baofit, 4 types of covariance
-    for rec, rnd in zip(['smu-pre-recon', 'smu-post-recon-std'],
-                        ['ar', 'sr']):
+    rec_types = ['smu-pre-recon', 'smu-post-recon-std']
+    rand_types = ['ar', 'sr']
+    for rec, rand in zip(rec_types, rand_types):
+        paths0 = sorted(glob(os.path.join(
+                save_dir, '{}_{:02}-[0-9]*'.format(sim_name_prefix, cosmology),
+                'z{}-r*'.format(redshift),
+                '{}-cross_*-xi_0*{}*{}.txt'.format(model_name, rec, rand))))
+        paths2 = sorted(glob(os.path.join(
+                save_dir, '{}_{:02}-[0-9]*'.format(sim_name_prefix, cosmology),
+                'z{}-r*'.format(redshift),
+                '{}-cross_*-xi_2*{}*{}.txt'.format(model_name, rec, rand))))
+        assert len(paths0) == len(paths2)
         xi_list = []
-        for phase in cov_phases:
-            sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-            paths0 = sorted(glob(os.path.join(
-                            save_dir, sim_name, 'z{}-r*'.format(redshift),
-                            '{}-cross_*-xi_0*{}*{}.txt'
-                            .format(model_name, rec, rnd))))
-            paths2 = sorted(glob(os.path.join(
-                            save_dir, sim_name, 'z{}-r*'.format(redshift),
-                            '{}-cross_*xi_2*{}*{}.txt'
-                            .format(model_name, rec, rnd))))
-            assert len(paths0) == len(paths2)
-            if len(paths0) == 0:
-                break  # no xi_0 in current phase directory
-            for path0, path2 in zip(paths0, paths2):
-                # sorted list of paths within a phase guarantees
-                # xi0 and xi2 are from the same realisation
-                xi_0 = np.loadtxt(path0)[:, 1]
-                xi_2 = np.loadtxt(path2)[:, 1]
-                xi_list.append(np.hstack((xi_0, xi_2)))
-        print('Calculating covariance matrix from {} xi samples...'
+        for path0, path2 in zip(paths0, paths2):
+            # sorted list of paths within a phase guarantees
+            # xi0 and xi2 are from the same realisation
+            xi_0 = np.loadtxt(path0)[:, 1]
+            xi_2 = np.loadtxt(path2)[:, 1]
+            xi_list.append(np.hstack((xi_0, xi_2)))
+        print('Calculating covariance matrix from {} multipole samples...'
               .format(len(xi_list)))
         cov_monoquad = np.cov(np.array(xi_list).T, bias=0)
         # correct for volume and jackknife
@@ -993,7 +989,7 @@ def do_cov(model_name, N_sub=3, cov_phases=range(16)):
         filepath = os.path.join(  # save to coadd folder for all phases
             save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
             'z{}'.format(redshift),
-            '{}-cross-xi_monoquad-cov-{}-{}.txt'.format(model_name, rec, rnd))
+            '{}-cross-xi_monoquad-cov-{}-{}.txt'.format(model_name, rec, rand))
         np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
         print('Monoquad covariance matrix saved to: ', filepath)
 

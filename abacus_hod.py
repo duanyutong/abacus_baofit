@@ -9,7 +9,7 @@ halo/galaxy/particle tables have the following default units:
     position:   Mpc / h
     velocity:   km / s
     mass:       Msun / h
-    radius:     kpc/h
+    radius:     kpc / h
 
 """
 
