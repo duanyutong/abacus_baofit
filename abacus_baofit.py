@@ -371,9 +371,17 @@ def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
         DR = np.load(os.path.join(filedir,
                                   '{}-auto-paircount-DR-{}-sr.npy'
                                   .format(model_name, mode)))['DR']
-        RR = np.load(os.path.join(filedir,
-                                  '{}-auto-paircount-RR-{}-sr.npy'
-                                  .format(model_name, mode)))['RR']
+        RR_list = []
+        for n in range(random_multiplier):
+            RRnpy = np.load(os.path.join(
+                    filedir, '{}-auto_{}-paircount-RR-{}-sr.npy'
+                    .format(model_name, n, mode)))
+            if 'smu' in mode:
+                RR, _ = rebin_smu_counts(RRnpy, 'RR')
+            elif 'rppi' in mode:
+                RR = RRnpy['RR']
+            RR_list.append(RR)
+        RR = np.mean(RR_list, axis=0)
     else:
         DR, RR = DR_ar, RR_ar
         np.savetxt(os.path.join(filedir,
@@ -501,8 +509,7 @@ def do_subcross_count(model, mode='smu-post-recon-std'):
 
 
 def do_subcross_correlation(linind, phase, r, model_name,
-                            mode='smu-post-recon-std',
-                            use_shifted_randoms=True):
+                            mode='smu-post-recon-std'):
 
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     filedir = os.path.join(save_dir, sim_name, 'z{}-r{}'.format(redshift, r))
@@ -514,7 +521,7 @@ def do_subcross_correlation(linind, phase, r, model_name,
                             '{}-cross_{}-paircount-DD-{}-rebinned.txt'
                             .format(model_name, linind, mode)),
                DD, fmt=txtfmt)
-    if 'post-recon-std' in mode and use_shifted_randoms:
+    if 'post-recon' in mode:
         DRnpy = np.load(os.path.join(filedir,
                                      '{}-cross_{}-paircount-DR-{}-sr.npy'
                                      .format(model_name, linind, mode)))
@@ -786,13 +793,14 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '2', str(seed), model_name, filedir])
         if do_pre_auto_corr:
-            # debug
-            # do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
-            do_auto_correlation(model_name, phase, r, mode='rppi-pre-recon')
+            if do_pre_auto_smu:
+                do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
+            if do_pre_auto_rppi:
+                do_auto_correlation(model_name, phase, r,
+                                    mode='rppi-pre-recon')
         if do_post_auto_corr:
             do_auto_correlation(model_name, phase, r,
                                 mode='rppi-post-recon-std')
-        # cross correlation calculation after pair-counting
         with closing(MyPool(processes=N_threads,
                             maxtasksperchild=1)) as p:
             if do_pre_cross_corr:
