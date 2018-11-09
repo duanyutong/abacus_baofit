@@ -590,6 +590,8 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
             model.param_dict['A_sat'] = -1
         elif model_name == 'gen_vel1':
             model.param_dict['alpha_c'] = 1
+        elif model_name == 'gen_vel2':
+            model.param_dict['alpha_c'] = 0.2
         elif model_name == 'gen_s1':
             model.param_dict['s'] = 0.9
         elif model_name == 'gen_sv1':
