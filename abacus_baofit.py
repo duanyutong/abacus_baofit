@@ -34,8 +34,8 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon-test'  # 'z0.5'
-phases = [0]  # range(16)  # [0, 1] # list(range(16))
+tagout = 'recon'  # 'z0.5'
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
@@ -48,7 +48,7 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_sp1',   'gen_sp1_n',
                'gen_vel1']
 model_names = ['gen_vel2']
-N_reals = 2
+N_reals = 12
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
 N_threads = 8  # number of threads for a single realisation
@@ -77,7 +77,7 @@ rp_bins = pi_bins
 prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
 store_dir = '/home/dyt/store/'
 save_dir = os.path.join(store_dir, sim_name_prefix+'-'+tagout)
-recon_temp_dir = os.path.join(store_dir, 'recon/')
+recon_temp_dir = os.path.join(store_dir, 'recon/temp')
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
