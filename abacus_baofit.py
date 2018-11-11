@@ -309,7 +309,7 @@ def do_auto_count(model, mode='smu-pre-recon'):
         elif 'rppi' in mode:
             DRnpy = DDrppi(0, N_threads, pi_max, rp_bins, x, y, z,
                            X2=xr, Y2=yr, Z2=zr, periodic=True, verbose=False,
-                           boxsize=L, output_savg=True, c_api_timer=False)
+                           boxsize=L, output_rpavg=True, c_api_timer=False)
         DRnpy = rfn.append_fields(
             DRnpy, ['DR'], [DRnpy['npairs'].astype(np.float64)/ND/NR],
             usemask=False)
@@ -687,6 +687,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                     and os.path.isfile(gt_recon_path) \
                     and os.path.isfile(path_sr):
                 do_recon_std = False
+            print('doing recon', do_recon_std)
             if len(glob(temp+'-auto-*-DD-rppi-post-recon-std*.npy')) == 1:
                 do_post_auto_rppi = False
             if len(glob(temp+'-cross_*-DD-smu-post-recon-std*.npy')) == 27:
@@ -740,7 +741,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '0', str(seed), model_name, filedir])
             # check that reconstructed catalogue exists
-            if do_recon_std or do_post_cross or do_post_auto_rppi:
+            if do_recon_std:
                 print('r = {}, now applying standard recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '1', str(seed), model_name, filedir])
@@ -767,7 +768,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 gt['x'], gt['y'], gt['z'] = D[:, 0], D[:, 1], D[:, 2]
                 model.mock.reconstructed = True
                 gt.write(gt_recon_path, format='ascii.fast_csv',
-                         overwrite=overwrite)
+                         overwrite=True)
                 np.save(path_sr, model.mock.shifted_randoms)  # save rand array
                 print('r = {}, shifted galaxies and randoms saved.')
             if do_post_auto_rppi or do_post_cross:
@@ -1061,7 +1062,7 @@ if __name__ == "__main__":
         for model_name in model_names:
             print('---\nWorking on {} realisations of phase {}, model {}...'
                   .format(N_reals, phase, model_name))
-            with closing(MyPool(processes=np.ceil(N_reals/2),
+            with closing(MyPool(processes=int(np.ceil(N_reals/2)),
                                 maxtasksperchild=1)) as p:
                 p.map(partial(do_galaxy_table,
                               phase=phase, model_name=model_name,
