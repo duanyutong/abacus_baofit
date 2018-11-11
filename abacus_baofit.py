@@ -34,12 +34,11 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
 # %% custom settings
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+tagout = 'recon-test'  # 'z0.5'
+phases = [0]  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
-model_names = ['gen_base1']
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_ass1',  'gen_ass1_n',
                'gen_ass2',  'gen_ass2_n',
@@ -48,8 +47,8 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n',
                'gen_vel1']
-N_reals = 4  # number of realisations for an HOD
-N_reals = 12
+model_names = ['gen_vel2']
+N_reals = 2
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
 N_threads = 8  # number of threads for a single realisation
@@ -340,13 +339,14 @@ def do_auto_count(model, mode='smu-pre-recon'):
                     RRnpy)
 
 
-def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std'):
+def do_auto_correlation(model_name, phase, r, mode='smu-pre-recon-std',
+                        use_shifted_randoms=False):
 
     if 'pre-recon' in mode:
-        use_shifted_randoms = False
+        # use_shifted_randoms = False
         rand_type = 'ar'
     elif 'post-recon' in mode:
-        use_shifted_randoms = True
+        # use_shifted_randoms = True
         rand_type = 'sr'
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     filedir = os.path.join(save_dir, sim_name, 'z{}-r{}'.format(redshift, r))
@@ -914,50 +914,47 @@ def convert_recon_correlation(model_name, phases=range(16)):
     b = 2.23  # galaxy bias for rescaling xi
 
     '''
-    fft = 7
-    print('Converting recon N and R to multipoles for model {}...'
-          .format(model_name))
-    # do this for both individual boxes and jackknife
-    for jk, i, phase in product([True, False], range(3), phases):
-        if jk:
-            sim_folder = '{}_{:02}-coadd'.format(sim_name_prefix, cosmology)
-        else:
-            sim_folder = '{}_{:02}-{}'.format(sim_name_prefix, cosmology)
-        filedir = os.path.join(save_dir, sim_folder, 'z{}'.format(redshift))
-        fnD, fnR = coadd_filenames[fft+2*i], coadd_filenames[fft+1+2*i]
-        tag = coadd_filenames[fft+2*i][7:]
-        N = np.loadtxt(os.path.join(
-            filedir, '{}-auto-{}'.format(model_name, fnD)
-            + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
-        R = np.loadtxt(os.path.join(
-            filedir, '{}-auto-{}'.format(model_name, fnR)
-            + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
-        assert np.all(N[:, 1] == R[:, 1])
-        r = N[:, 1]
-        xi_0 = N[:, 3] / R[:, 3] * np.square(galaxy_bias)
-        xi_2 = N[:, 4] / R[:, 3] * np.square(galaxy_bias)
-        xi_0_txt = np.vstack([r, xi_0]).T
-        xi_2_txt = np.vstack([r, xi_2]).T
-        for ell, xi_ell in zip([0, 2], [xi_0_txt, xi_2_txt]):
-            np.savetxt(os.path.join(
-                    filedir,
-                    '{}-auto-fftcorr_xi_{}-{}'.format(model_name, ell, tag)
-                    + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'),
-                xi_ell, fmt=txtfmt)
+    try:
+        fft = 7
+        print('Converting recon N and R to multipoles for model {}...'
+              .format(model_name))
+        # do this for both individual boxes and jackknife
+        for jk, i, phase in product([True, False], range(3), phases):
+            if jk:
+                simf = '{}_{:02}-coadd'.format(sim_name_prefix, cosmology)
+            else:
+                simf = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
+            filedir = os.path.join(save_dir, simf, 'z{}'.format(redshift))
+            tag = coadd_filenames[fft+2*i][7:]
+            pathsD = glob(os.path.join(
+                filedir,
+                '{}-auto-{}'.format(model_name, coadd_filenames[fft+2*i])
+                + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
+            pathsR = glob(os.path.join(
+                filedir,
+                '{}-auto-{}'.format(model_name, coadd_filenames[fft+1+2*i])
+                + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
+            assert len(pathsD) == len(pathsR) == 1
+            N, R = np.loadtxt(pathsD[0]), np.loadtxt(pathsR[0])
+            assert np.all(N[:, 1] == R[:, 1])
+            r = N[:, 1]
+            xi_0 = N[:, 3] / R[:, 3] * np.square(galaxy_bias)
+            xi_2 = N[:, 4] / R[:, 3] * np.square(galaxy_bias)
+            xi_0_txt = np.vstack([r, xi_0]).T
+            xi_2_txt = np.vstack([r, xi_2]).T
+            for ell, xi_ell in zip([0, 2], [xi_0_txt, xi_2_txt]):
+                np.savetxt(os.path.join(
+                        filedir,
+                        '{}-auto-fftcorr_xi_{}-{}'.format(model_name, ell, tag)
+                        + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'),
+                    xi_ell, fmt=txtfmt)
+    except Exception as E:
+        print('Exception caught in thread {}'.format(model_name))
+        traceback.print_exc()
+        raise E
 
 
 def do_cov(model_name, N_sub=3, cov_phases=range(16)):
-
-    # for ell in [0, 2]:
-    #     paths = []
-    #     for phase in cov_phases:
-    #         sim_name = '{}_{:02}-{}' \
-    #                    .format(sim_name_prefix, cosmology, phase)
-    #         paths = paths + glob(os.path.join(
-    #                     save_dir, sim_name, 'z{}-r*'.format(redshift),
-    #                     '{}-cross_*-xi_{}.txt'.format(model_name, ell)))
-    #     # read in all xi files for all phases
-    #     xi_list = [np.loadtxt(path)[:, 1] for path in paths]
 
     # calculate monoquad cov for baofit, 4 types of covariance
     rec_types = ['smu-pre-recon', 'smu-post-recon-std']
@@ -1056,47 +1053,47 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
 if __name__ == "__main__":
 
-#    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
-#                                 redshift, cosmology)
-#    for phase in phases:
-#        halocat = make_halocat(phase)
-#        halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
-#        for model_name in model_names:
-#            print('---\nWorking on {} realisations of phase {}, model {}...'
-#                  .format(N_reals, phase, model_name))
-#            with closing(MyPool(processes=int(N_reals/2),
-#                                maxtasksperchild=1)) as p:
-#                p.map(partial(do_galaxy_table,
-#                              phase=phase, model_name=model_name,
-#                              overwrite=False),
-#                      range(N_reals))
-#            with closing(MyPool(processes=N_concurrent_reals,
-#                                maxtasksperchild=1)) as p:
-#                p.map(partial(
-#                        do_realisation, phase=phase, model_name=model_name,
-#                        overwrite=False,
-#                        do_pre_auto_smu=False, do_pre_auto_rppi=True,
-#                        do_pre_auto_fft=True, do_pre_cross=True,
-#                        do_recon_std=True, do_post_auto_rppi=True,
-#                        do_post_cross=True, do_recon_ite=True,
-#                        do_pre_auto_corr=True, do_post_auto_corr=True,
-#                        do_pre_cross_corr=True, do_post_cross_corr=True),
-#                      range(N_reals))
-#            p.close()
-#            p.join()
-#            print('---\nPool closed cleanly for model {}.\n---'
-#                  .format(model_name))
-#        with closing(MyPool(processes=len(model_names),
-#                            maxtasksperchild=1)) as p:
-#            p.map(partial(coadd_realisations, phase=phase, N_reals=N_reals),
-#                  model_names)
-#        p.close()
-#        p.join()
-#    combine_galaxy_table_metadata()
+    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
+                                 redshift, cosmology)
+    for phase in phases:
+        halocat = make_halocat(phase)
+        halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
+        for model_name in model_names:
+            print('---\nWorking on {} realisations of phase {}, model {}...'
+                  .format(N_reals, phase, model_name))
+            with closing(MyPool(processes=np.ceil(N_reals/2),
+                                maxtasksperchild=1)) as p:
+                p.map(partial(do_galaxy_table,
+                              phase=phase, model_name=model_name,
+                              overwrite=False),
+                      range(N_reals))
+            with closing(MyPool(processes=N_concurrent_reals,
+                                maxtasksperchild=1)) as p:
+                p.map(partial(
+                        do_realisation, phase=phase, model_name=model_name,
+                        overwrite=False,
+                        do_pre_auto_smu=False, do_pre_auto_rppi=True,
+                        do_pre_auto_fft=True, do_pre_cross=True,
+                        do_recon_std=True, do_post_auto_rppi=True,
+                        do_post_cross=True, do_recon_ite=True,
+                        do_pre_auto_corr=True, do_post_auto_corr=True,
+                        do_pre_cross_corr=True, do_post_cross_corr=True),
+                      range(N_reals))
+            p.close()
+            p.join()
+            print('---\nPool closed cleanly for model {}.\n---'
+                  .format(model_name))
+        with closing(MyPool(processes=len(model_names),
+                            maxtasksperchild=1)) as p:
+            p.map(partial(coadd_realisations, phase=phase, N_reals=N_reals),
+                  model_names)
+        p.close()
+        p.join()
+    combine_galaxy_table_metadata()
     with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
-#        p.map(coadd_phases, model_names)
-#        p.map(do_cov, model_names)
+        p.map(coadd_phases, model_names)
+        p.map(do_cov, model_names)
         p.map(convert_recon_correlation, model_names)
-#    p.close()
-#    p.join()
-#    run_baofit_parallel(baofit_phases=phases)
+    p.close()
+    p.join()
+    run_baofit_parallel(baofit_phases=phases)

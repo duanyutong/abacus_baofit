@@ -384,6 +384,8 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir', perihelion=False,
             else:
                 pass  # print(str_template)
         pt['r_perihelion'] = np.float32(r0*Xnew * h)  # in kpc/h
+    else:
+        pt['r_perihelion'] = np.nan  # in kpc/h
     return pt
 
 
