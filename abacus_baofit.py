@@ -2,7 +2,7 @@
 """
 Created on Wed Oct 25 17:30:51 2017
 
-@author: Duan Yutong (dyt@physics.bu.edu)L
+@author: Duan Yutong (dyt@physics.bu.edu)
 
 """
 from __future__ import (
@@ -19,7 +19,7 @@ import numpy.lib.recfunctions as rfn
 from astropy import table
 from halotools.mock_observables import tpcf_multipole
 from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
-        spherical_sector_volume
+    spherical_sector_volume
 from halotools.mock_observables.two_point_clustering.rp_pi_tpcf import \
     cylinder_volume
 from halotools.utils import add_halo_hostid
@@ -33,9 +33,9 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 
 
 # %% custom settings
-sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'recon'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+sim_name_prefix = 'AbacusCosmos_1100box_planck'
+tagout = ''  # 'z0.5'
+phases = range(20)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
@@ -46,8 +46,7 @@ model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_s1',    'gen_s1_n',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n',
-               'gen_vel1']
-model_names = ['gen_vel2']
+               'gen_vel1',  'gen_vel2']
 N_reals = 12
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
@@ -74,9 +73,10 @@ pi_bins = np.arange(0, pi_max+1, 1)
 rp_bins = pi_bins
 
 # %% fixed catalogue parameters
-prod_dir = r'/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
+# prod_dir = '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
+prod_dir = '/mnt/gosling1/bigsim_products/AbacusCosmos_1100box_planck_products/'
 store_dir = '/home/dyt/store/'
-save_dir = os.path.join(store_dir, sim_name_prefix+'-'+tagout)
+save_dir = os.path.join(store_dir, sim_name_prefix+tagout)
 recon_temp_dir = os.path.join(store_dir, 'recon/temp')
 halo_type = 'Rockstar'
 halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
@@ -444,6 +444,7 @@ def do_subcross_count(model, mode='smu-post-recon-std'):
         use_shifted_randoms = False
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
+        print('r = {}, subcross counting subvol {}...'.format(model.r, linind))
         # print('r = {}, x-corr counting subvol {}...'.format(model.r, linind))
         x2, y2, z2 = subvol_mask(gt['x'], gt['y'], gt['z'], i, j, k, L, N_sub)
         ND2 = x2.size  # number of galaxies in the subvolume
@@ -596,15 +597,14 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
         if os.path.isfile(gt_path) and not overwrite:
             return
         global halocat
-        try:
-            assert halocat.ZD_Seed == phase
-        except NameError or AssertionError:
-            halocat = make_halocat(phase)
-            halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
+        assert halocat.ZD_Seed == phase or halocat.ZD_Seed == 100 + phase
         seed = phase*100 + r
         # all realisations in parallel, each model needs to be instantiated
         model = initialise_model(redshift, model_name,
                                  halo_m_prop=halo_m_prop)
+        model.N_cut = N_cut  # add useful model properties here
+        model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
+                store_dir, sim_name_prefix, 'c_median_poly.txt')))
         model.r = r
         # random seed w/ phase and realisation index r, model independent
         print('r = {} for phase {}, model {} starting...'
@@ -673,6 +673,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
         path_sr = os.path.join(filedir,
                                '{}-shifted_randoms-post-recon-std.npy'
                                .format(model_name))
+        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if os.path.isfile(gt_path) and not overwrite:
             temp = os.path.join(filedir, model_name)
             if len(glob(temp+'-auto-paircount-DD-smu-pre-recon.npy')) == 1:
@@ -687,7 +688,6 @@ def do_realisation(r, phase, model_name, overwrite=False,
                     and os.path.isfile(gt_recon_path) \
                     and os.path.isfile(path_sr):
                 do_recon_std = False
-            print('doing recon', do_recon_std)
             if len(glob(temp+'-auto-*-DD-rppi-post-recon-std*.npy')) == 1:
                 do_post_auto_rppi = False
             if len(glob(temp+'-cross_*-DD-smu-post-recon-std*.npy')) == 27:
@@ -702,14 +702,12 @@ def do_realisation(r, phase, model_name, overwrite=False,
             do_count = False
         else:
             do_count = True
+        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if do_count:  # everything within is counting, require loading halocat
-            assert halocat.ZD_Seed == phase
+            assert halocat.ZD_Seed == phase or halocat.ZD_Seed == 100 + phase
             # all realisations in parallel, each model needs to be instantiated
             model = initialise_model(redshift, model_name,
                                      halo_m_prop=halo_m_prop)
-            model.N_cut = N_cut  # add useful model properties here
-            model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
-                    store_dir, sim_name_prefix, 'c_median_poly.txt')))
             model.r = r
             # random seed w/ phase and realisation index r, model independent
             print('r = {} for phase {}, model {} starting...'
@@ -770,10 +768,10 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 gt.write(gt_recon_path, format='ascii.fast_csv',
                          overwrite=True)
                 np.save(path_sr, model.mock.shifted_randoms)  # save rand array
-                print('r = {}, shifted galaxies and randoms saved.')
+                print('r = {}, shifted galaxies and randoms saved.'.format(r))
             if do_post_auto_rppi or do_post_cross:
                 if model.mock.reconstructed:
-                    pass
+                    pass  # mock already has shifted D, R samples
                 elif os.path.isfile(gt_recon_path) and os.path.isfile(path_sr):
                     model.mock.galaxy_table = gt = table.Table.read(
                         gt_recon_path, format='ascii.fast_csv',
@@ -787,7 +785,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
             if do_post_auto_rppi:
                 do_auto_count(model, mode='rppi-post-recon-std')
             if do_post_cross:
-                print('r = {}, calculating x-corr covariance...'.format(r))
+                print('r = {}, full-subvolume cross counting...'.format(r))
                 do_subcross_count(model, mode='smu-post-recon-std')
             # iterative reconstruction, reads original positions from .dat file
             # this removes reconstructed catalogues, so run it after x-corr
@@ -795,10 +793,10 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 print('r = {}, now applying iterative recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '2', str(seed), model_name, filedir])
+        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if do_pre_auto_corr:
-            if do_pre_auto_smu:
-                do_auto_correlation(model_name, phase, r, mode='smu-pre-recon')
-            if do_pre_auto_rppi:
+                do_auto_correlation(model_name, phase, r,
+                                    mode='smu-pre-recon')
                 do_auto_correlation(model_name, phase, r,
                                     mode='rppi-pre-recon')
         if do_post_auto_corr:
@@ -824,12 +822,16 @@ def do_realisation(r, phase, model_name, overwrite=False,
 
 
 coadd_filenames = [  # coadd_realisations
-    'xi-smu-pre-recon-ar', 'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
+    # 'xi-smu-pre-recon-ar', 'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
     'xi-rppi-pre-recon-ar', 'xi-rppi-post-recon-std-sr',
-    'wp-pre-recon-ar', 'wp-post-recon-std-sr',
-    'fft*_N-pre-recon-15.0_hmpc', 'fft*_R-pre-recon-15.0_hmpc',
-    'fft*_N-post-recon-std-15.0_hmpc', 'fft*_R-post-recon-std-15.0_hmpc',
-    'fft*_N-post-recon-ite-15.0_hmpc', 'fft*_R-post-recon-ite-15.0_hmpc']
+    'wp-rppi-pre-recon-ar', 'wp-rppi-post-recon-std-sr',
+    'fftcorr_N-pre-recon-15.0_hmpc',
+    'fftcorr_R-pre-recon-15.0_hmpc',
+    'fftcorr_N-post-recon-std-15.0_hmpc',
+    'fftcorr_R-post-recon-std-15.0_hmpc',
+    'fftcorr_N-post-recon-ite-15.0_hmpc',
+    'fftcorr_R-post-recon-ite-15.0_hmpc']
+fft = ['fftcorr' in fn for fn in coadd_filenames].index(True)
 
 
 def coadd_realisations(model_name, phase, N_reals):
@@ -862,10 +864,10 @@ def coadd_realisations(model_name, phase, N_reals):
             error, fmt=txtfmt)
 
 
-def coadd_phases(model_name, coadd_phases=range(16)):
+def coadd_phases(model_name):
 
     print('Coadding xi from {} phases for model {}...'
-          .format(len(coadd_phases), model_name))
+          .format(len(phases), model_name))
     filedir = os.path.join(save_dir,
                            '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                            'z{}'.format(redshift))
@@ -878,10 +880,10 @@ def coadd_phases(model_name, coadd_phases=range(16)):
             'z{}'.format(redshift), model_name+'-auto*'+fn+'*coadd*')
         paths = glob(temp)  # co-add all boxes together
         try:
-            assert len(paths) == len(coadd_phases)
+            assert len(paths) == len(phases)
         except AssertionError as E:
-            print('temp is:', temp)
-            print('paths are:', paths)
+            print('template is:', temp)
+            print('paths globbed:', paths)
             raise E
         corr_list = [np.loadtxt(path) for path in paths]
         coadd, error = coadd_correlation(corr_list)
@@ -891,10 +893,11 @@ def coadd_phases(model_name, coadd_phases=range(16)):
         np.savetxt(os.path.join(
                 filedir, '{}-auto-{}-error.txt'.format(model_name, fn)),
             error, fmt=txtfmt)
-        print('Producing delete-1 jackknife samples for model {}...')
-        for phase in coadd_phases:  # jackknife delete-one
+        print('Producing delete-1 jackknife samples for model {}...'
+              .format(model_name))
+        for phase in phases:  # jackknife delete-one
             jk_list = corr_list[:phase] + corr_list[phase+1:]
-            assert len(jk_list) == len(coadd_phases) - 1
+            assert len(jk_list) == len(phases) - 1
             coadd, error = coadd_correlation(jk_list)
             np.savetxt(os.path.join(
                     filedir, '{}-auto-{}-jackknife_{}-coadd.txt'
@@ -906,7 +909,7 @@ def coadd_phases(model_name, coadd_phases=range(16)):
                 error, fmt=txtfmt)
 
 
-def convert_recon_correlation(model_name, phases=range(16)):
+def convert_recon_correlation(model_name):
 
     '''
     take pre- and post-recon FFTcorr jackknife results from each box,
@@ -916,7 +919,6 @@ def convert_recon_correlation(model_name, phases=range(16)):
 
     '''
     try:
-        fft = 7
         print('Converting recon N and R to multipoles for model {}...'
               .format(model_name))
         # do this for both individual boxes and jackknife
@@ -926,7 +928,7 @@ def convert_recon_correlation(model_name, phases=range(16)):
             else:
                 simf = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
             filedir = os.path.join(save_dir, simf, 'z{}'.format(redshift))
-            tag = coadd_filenames[fft+2*i][7:]
+            tag = coadd_filenames[fft+2*i][10:]
             pathsD = glob(os.path.join(
                 filedir,
                 '{}-auto-{}'.format(model_name, coadd_filenames[fft+2*i])
@@ -955,7 +957,7 @@ def convert_recon_correlation(model_name, phases=range(16)):
         raise E
 
 
-def do_cov(model_name, N_sub=3, cov_phases=range(16)):
+def do_cov(model_name):
 
     # calculate monoquad cov for baofit, 4 types of covariance
     rec_types = ['smu-pre-recon', 'smu-post-recon-std']
@@ -1012,7 +1014,7 @@ def combine_galaxy_table_metadata():
                   format='ascii.fast_csv', overwrite=True)
 
 
-def run_baofit_parallel(baofit_phases=range(16)):
+def run_baofit_parallel(baofit_phases):
 
     from baofit import baofit
     filedir = os.path.join(save_dir,
@@ -1022,7 +1024,7 @@ def run_baofit_parallel(baofit_phases=range(16)):
     for model_name in model_names:
         # for i in [0]:  # cebug
         for i in range(3):
-            xi_type = coadd_filenames[7+2*i][10:]
+            xi_type = coadd_filenames[fft+2*i][10:]
             for phase in baofit_phases:  # list of inputs for parallelisation
                 path_xi_0 = os.path.join(
                     filedir,
@@ -1054,8 +1056,8 @@ def run_baofit_parallel(baofit_phases=range(16)):
 
 if __name__ == "__main__":
 
-    c_median_poly = fit_c_median(sim_name_prefix, prod_dir, store_dir,
-                                 redshift, cosmology)
+    fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
+                 phases=phases)
     for phase in phases:
         halocat = make_halocat(phase)
         halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
@@ -1072,8 +1074,8 @@ if __name__ == "__main__":
                                 maxtasksperchild=1)) as p:
                 p.map(partial(
                         do_realisation, phase=phase, model_name=model_name,
-                        overwrite=False,
-                        do_pre_auto_smu=False, do_pre_auto_rppi=True,
+                        overwrite=True,
+                        do_pre_auto_smu=True, do_pre_auto_rppi=True,
                         do_pre_auto_fft=True, do_pre_cross=True,
                         do_recon_std=True, do_post_auto_rppi=True,
                         do_post_cross=True, do_recon_ite=True,

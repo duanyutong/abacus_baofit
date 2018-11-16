@@ -646,9 +646,6 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
         model.mock.gt_loaded = False
     # use particle-based HOD
     elif model.model_type == 'general':
-        # random seed using phase and realisation index r, model independent
-        seed = halocat.ZD_Seed * 100 + model.r
-        np.random.seed(seed)  # set random generator deterministically
         if hasattr(model, 'mock'):
             # attribute mock present, at least second realisation
             pass
@@ -663,6 +660,9 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
             print('r = {}, populating {} halos, ...'
                   .format(model.r, len(model.mock.halo_table)))
+            # random seed using phase and r, model independent
+            seed = halocat.ZD_Seed * 100 + model.r
+            np.random.seed(seed)  # set random generator deterministically
             model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
@@ -683,10 +683,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
 
 def make_galaxies(model, add_rsd=True):
 
-    '''
-    add_rsd modifies z coordiante of halos which do host central galaxies
-    '''
-
+    #  add_rsd modifies z coordiante of halos which do host central galaxies
     h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
     ht = model.mock.halo_table
     N_halos = len(ht)  # total number of host halos available
@@ -699,6 +696,16 @@ def make_galaxies(model, add_rsd=True):
     if A_cen != 0 or A_sat != 0:    # calculate delta c with original mass
         c_median = model.c_median_poly(np.log10(halo_m))
         delta_c = ht['halo_nfw_conc'] - c_median
+    # centrals and sat random numbers are first thrown after seed has been set
+    # N_halos + N_part random numbers are generated in the beginning in
+    # half-open interval [0. 1), ensuring the randoms numbers are
+    # model-independent and results differentiable
+    ht['N_cen_rand'] = np.random.random(N_halos)
+    pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
+    N_particles = len(pt)
+    # N_part random numbers are generated, same for all models
+    pt['N_sat_rand'] = np.random.random(N_particles)
+
     '''
     centrals
 
@@ -713,8 +720,6 @@ def make_galaxies(model, add_rsd=True):
         halo_m = halo_m[ind_m][ind_pm]  # assign pseudomass to halo mass
     # calculate N_cen_mean using given model for all halos
     ht['N_cen_model'] = N_cen_mean(halo_m / h, model.param_dict)
-    # create N_halos random numbers in half-open interval [0. 1) for centrals
-    ht['N_cen_rand'] = np.random.random(N_halos)
     # if random number is less than model probably, halo hosts a central
     mask_cen = ht['N_cen_rand'] < ht['N_cen_model']
     # add halo velocity bias for observer along LOS
@@ -771,8 +776,7 @@ def make_galaxies(model, add_rsd=True):
     # ht['N_sat_model'][ht['halo_subsamp_len'] == 0] = 0
     print('r = {}, creating inherited halo properties for centrals...'
           .format(model.r))
-    pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
-    N_particles = len(pt)
+
     # inherite columns from halo talbe and add to particle table
     # particles belonging to the same halo share the same values
     col_cen_inh = ['halo_upid', 'halo_id', 'halo_hostid',
@@ -789,26 +793,11 @@ def make_galaxies(model, add_rsd=True):
     pt = process_particle_props(pt, h, halo_m_prop=model.halo_m_prop,
                                 perihelion=(model.param_dict['s_p'] != 0))
     # particle table complete. onto satellite generation
-    # calculate satellite probablity and generate random numbers
-    pt['N_sat_rand'] = np.random.random(N_particles)
+
     # add particle ranking using s, s_v, s_p for each halo
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
         pt[key] = np.int32(-1)
-    # for rank_flag, rank_name, rank_key in zip(
-    #     ['s', 's_v', 's_p'],
-    #     ['rank_s', 'rank_s_v', 'rank_s_p'],
-    #     ['r_centric', 'v_pec', 'r_perihelion']):
-    #     if model.param_dict[rank_flag] != 0:
-    #         print('r = {}, ranking particles within each halo by {}...'
-    #               .format(model.r, rank_key))
-    #         with closing(MyPool(processes=10, maxtasksperchild=1)) as p:
-    #             rankings = p.imap(partial(rank_halo_particles,
-    #                                       rank_key=rank_key),
-    #                               range(N_halos))
-    #         p.close()
-    #         p.join()
-    #         pt[rank_name] = np.concatenate(rankings)
     print('r = {}, ranking particles within each halo...'.format(model.r))
     for i in range(N_halos):
         m = ht['halo_subsamp_start'][i]
