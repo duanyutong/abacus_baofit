@@ -444,8 +444,8 @@ def do_subcross_count(model, mode='smu-post-recon-std'):
         use_shifted_randoms = False
     for i, j, k in product(range(N_sub), repeat=3):
         linind = i*N_sub**2 + j*N_sub + k  # linearised index of subvolumes
-        print('r = {}, subcross counting subvol {}...'.format(model.r, linind))
-        # print('r = {}, x-corr counting subvol {}...'.format(model.r, linind))
+        print('r = {:2d}, subcross counting subvol {}...'.format(model.r, linind))
+        # print('r = {:2d}, x-corr counting subvol {}...'.format(model.r, linind))
         x2, y2, z2 = subvol_mask(gt['x'], gt['y'], gt['z'], i, j, k, L, N_sub)
         ND2 = x2.size  # number of galaxies in the subvolume
         DDnpy = DDsmu(0, N_threads, s_bins_counts, mu_max, n_mu_bins,
@@ -518,7 +518,7 @@ def do_subcross_correlation(linind, phase, r, model_name,
 
     sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
     filedir = os.path.join(save_dir, sim_name, 'z{}-r{}'.format(redshift, r))
-    # print('r = {}, x-correlation subvolume {}...'.format(r, linind))
+    # print('r = {:2d}, x-correlation subvolume {}...'.format(r, linind))
     DDnpy = np.load(os.path.join(filedir, '{}-cross_{}-paircount-DD-{}.npy'
                                  .format(model_name, linind, mode)))
     DD, _ = rebin_smu_counts(DDnpy, 'DD')  # re-bin and re-weight
@@ -607,14 +607,14 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
                 store_dir, sim_name_prefix, 'c_median_poly.txt')))
         model.r = r
         # random seed w/ phase and realisation index r, model independent
-        print('r = {} for phase {}, model {} starting...'
+        print('r = {:2d} for phase {}, model {} starting...'
               .format(r, phase, model_name))
         model = populate_model(halocat, model, add_rsd=add_rsd,
                                gt_path=(not overwrite)*gt_path)
         gt = model.mock.galaxy_table
         # save galaxy table if it's not already loaded from disk
         if save_hod_realisation and not model.mock.gt_loaded:
-            print('r = {}, saving galaxy table...'.format(r))
+            print('r = {:2d}, saving galaxy table...'.format(r))
             try:
                 os.makedirs(os.path.dirname(gt_path))
             except OSError:
@@ -640,7 +640,7 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
                     .format(model_name, redshift, phase, r)),
                 format='ascii.fast_csv', overwrite=True)
     except Exception as E:
-        print('Exception caught in worker thread r = {}'.format(r))
+        print('Exception caught in worker thread r = {:2d}'.format(r))
         traceback.print_exc()
         raise E
 
@@ -673,7 +673,6 @@ def do_realisation(r, phase, model_name, overwrite=False,
         path_sr = os.path.join(filedir,
                                '{}-shifted_randoms-post-recon-std.npy'
                                .format(model_name))
-        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if os.path.isfile(gt_path) and not overwrite:
             temp = os.path.join(filedir, model_name)
             if len(glob(temp+'-auto-paircount-DD-smu-pre-recon.npy')) == 1:
@@ -698,11 +697,10 @@ def do_realisation(r, phase, model_name, overwrite=False,
                  do_pre_cross,
                  do_recon_std, do_post_auto_rppi, do_post_cross, do_recon_ite]
         if not np.any(flags):
-            print('r = {}, all counting done,'.format(r))
+            print('r = {:2d}, all counting done,'.format(r))
             do_count = False
         else:
             do_count = True
-        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if do_count:  # everything within is counting, require loading halocat
             assert halocat.ZD_Seed == phase or halocat.ZD_Seed == 100 + phase
             # all realisations in parallel, each model needs to be instantiated
@@ -710,19 +708,19 @@ def do_realisation(r, phase, model_name, overwrite=False,
                                      halo_m_prop=halo_m_prop)
             model.r = r
             # random seed w/ phase and realisation index r, model independent
-            print('r = {} for phase {}, model {} starting...'
+            print('r = {:2d} for phase {}, model {} starting...'
                   .format(r, phase, model_name))
             model = populate_model(halocat, model, add_rsd=add_rsd,
                                    gt_path=gt_path)
             gt = model.mock.galaxy_table
             if do_pre_auto_smu:  # pre-recon auto-correlation pair-counting
-                print('r = {}, pre-recon smu pair-counting...'.format(r))
+                print('r = {:2d}, pre-recon smu pair-counting...'.format(r))
                 do_auto_count(model, mode='smu-pre-recon')
             if do_pre_auto_rppi:
-                print('r = {}, pre-recon rppi pair-counting...'.format(r))
+                print('r = {:2d}, pre-recon rppi pair-counting...'.format(r))
                 do_auto_count(model, mode='rppi-pre-recon')
             if do_pre_cross:
-                print('r = {}, now counting for pre-recon x-corr...'.format(r))
+                print('r = {:2d}, now counting for pre-recon x-corr...'.format(r))
                 do_subcross_count(model, mode='smu-pre-recon')
             if do_pre_auto_fft or do_recon_std or do_recon_ite:
                 # reconstruction prep work
@@ -735,12 +733,12 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 subprocess.call(['python', './recon/read/read.py',
                                  str(phase), str(seed)])
             if do_pre_auto_fft:  # pre-recon auto-correlation with FFTcorr
-                print('r = {}, now calculating pre-recon FFTcorr...'.format(r))
+                print('r = {:2d}, now calculating pre-recon FFTcorr...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '0', str(seed), model_name, filedir])
             # check that reconstructed catalogue exists
             if do_recon_std:
-                print('r = {}, now applying standard recon...'.format(r))
+                print('r = {:2d}, now applying standard recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '1', str(seed), model_name, filedir])
                 # rename shifted D and R to avoid being deleted by recon-ite
@@ -749,7 +747,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 os.rename(os.path.join(recon_temp_dir,
                                        'file_R-{}_rec'.format(seed)), pathR)
                 # save shifted D and R
-                print('r = {}, reading shifted D, R samples...'.format(r))
+                print('r = {:2d}, reading shifted D, R samples...'.format(r))
                 D = np.float32(np.fromfile(pathD, dtype=np.float64)
                                [8:].reshape(-1, 4)[:, :3])
                 R = np.float32(np.fromfile(pathR, dtype=np.float64)
@@ -757,7 +755,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 D[D < 0] += 1100  # read.cpp wraps data above 550 to negative
                 R[R < 0] += 1100  # undo wrapping by read.cpp
                 # randomly choose a 10 x ND subset of shited random sample
-                print('r = {}, randomly choosing shifted randoms...'.format(r))
+                print('r = {:2d}, randomly choosing shifted randoms...'.format(r))
                 idx = np.random.choice(np.arange(R.shape[0]),
                                        size=model.mock.ND * random_multiplier,
                                        replace=False)
@@ -768,7 +766,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 gt.write(gt_recon_path, format='ascii.fast_csv',
                          overwrite=True)
                 np.save(path_sr, model.mock.shifted_randoms)  # save rand array
-                print('r = {}, shifted galaxies and randoms saved.'.format(r))
+                print('r = {:2d}, shifted galaxies and randoms saved.'.format(r))
             if do_post_auto_rppi or do_post_cross:
                 if model.mock.reconstructed:
                     pass  # mock already has shifted D, R samples
@@ -783,17 +781,17 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 else:
                     raise Exception('Missing reconstructed catalogues.')
             if do_post_auto_rppi:
+                print('r = {:2d}, post-recon xi(rp, pi) counting..'.format(r))
                 do_auto_count(model, mode='rppi-post-recon-std')
             if do_post_cross:
-                print('r = {}, full-subvolume cross counting...'.format(r))
+                print('r = {:2d}, full-subvolume cross counting...'.format(r))
                 do_subcross_count(model, mode='smu-post-recon-std')
             # iterative reconstruction, reads original positions from .dat file
             # this removes reconstructed catalogues, so run it after x-corr
             if do_recon_ite:
-                print('r = {}, now applying iterative recon...'.format(r))
+                print('r = {:2d}, now applying iterative recon...'.format(r))
                 subprocess.call(['python', './recon/reconstruct/reconst.py',
                                  '2', str(seed), model_name, filedir])
-        print('doing auto corr', do_pre_auto_corr, do_post_auto_corr)  # debug
         if do_pre_auto_corr:
                 do_auto_correlation(model_name, phase, r,
                                     mode='smu-pre-recon')
@@ -814,9 +812,9 @@ def do_realisation(r, phase, model_name, overwrite=False,
                       range(N_sub**3))
         p.close()
         p.join()
-        print('r = {} finished.'.format(r))
+        print('r = {:2d} finished.'.format(r))
     except Exception as E:
-        print('Exception caught in worker thread r = {}'.format(r))
+        print('Exception caught in worker thread r = {:2d}'.format(r))
         traceback.print_exc()
         raise E
 

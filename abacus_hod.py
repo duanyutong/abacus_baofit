@@ -634,7 +634,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
     # use halotools HOD
     if model.model_type == 'prebuilt':
 
-        print('Populating {} halos with N_cut = {} for r = {}'
+        print('Populating {} halos with N_cut = {} for r = {:2d}'
               'using prebuilt model {} ...'
               .format(len(halocat.halo_table), model.N_cut,
                       model.r, model.model_name))
@@ -658,7 +658,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             model.mock.halo_ptcl_table = halocat.halo_ptcl_table
         if gt_path == '' or not os.path.isfile(gt_path):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
-            print('r = {}, populating {} halos, ...'
+            print('r = {:2d}, populating {} halos, ...'
                   .format(model.r, len(model.mock.halo_table)))
             # random seed using phase and r, model independent
             seed = halocat.ZD_Seed * 100 + model.r
@@ -666,7 +666,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             model = make_galaxies(model, add_rsd=add_rsd)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
-            print('r = {}, loading existing galaxy table: {}'
+            print('r = {:2d}, loading existing galaxy table: {}'
                   .format(model.r, gt_path))
             model.mock.galaxy_table = gt = table.Table.read(
                 gt_path, format='ascii.fast_csv',
@@ -754,7 +754,7 @@ def make_galaxies(model, add_rsd=True):
     # combine inherited fields and new field(s)
     gt_cen = table.hstack([gt_inh, gt_new], join_type='exact')
     gt_cen['gal_type'] = 'centrals'
-    print('r = {}, {} centrals generated.'.format(model.r, len(gt_cen)))
+    print('r = {:2d}, {} centrals generated.'.format(model.r, len(gt_cen)))
 
     '''
     satellites
@@ -774,7 +774,7 @@ def make_galaxies(model, add_rsd=True):
     ht['N_sat_model'][mask] /= ht['halo_subsamp_len'][mask]
     # # fix inf due to dividing by zero
     # ht['N_sat_model'][ht['halo_subsamp_len'] == 0] = 0
-    print('r = {}, creating inherited halo properties for centrals...'
+    print('r = {:2d}, creating inherited halo properties for centrals...'
           .format(model.r))
 
     # inherite columns from halo talbe and add to particle table
@@ -789,7 +789,7 @@ def make_galaxies(model, add_rsd=True):
         # numpy bug, cannot cast uint64 to int64 for repeat
         pt[col] = np.repeat(ht[col], ht['halo_subsamp_len'].astype(np.int64))
     # calculate additional particle quantities for decorations
-    print('r = {}, processing particle table properties...'.format(model.r))
+    print('r = {:2d}, processing particle table properties...'.format(model.r))
     pt = process_particle_props(pt, h, halo_m_prop=model.halo_m_prop,
                                 perihelion=(model.param_dict['s_p'] != 0))
     # particle table complete. onto satellite generation
@@ -798,7 +798,7 @@ def make_galaxies(model, add_rsd=True):
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
         pt[key] = np.int32(-1)
-    print('r = {}, ranking particles within each halo...'.format(model.r))
+    print('r = {:2d}, ranking particles within each halo...'.format(model.r))
     for i in range(N_halos):
         m = ht['halo_subsamp_start'][i]
         n = ht['halo_subsamp_len'][i]
@@ -832,7 +832,7 @@ def make_galaxies(model, add_rsd=True):
                    model.mock.BoxSize/h) * h  # in Mpc/h
     else:
         z = pt['z'][mask_sat]
-    print('r = {}, creating inherited halo properties for satellites...'
+    print('r = {:2d}, creating inherited halo properties for satellites...'
           .format(model.r))
     # satellite calculation done, create satellites table
     # create galaxy_table columns to be inherited from particle table
@@ -856,7 +856,7 @@ def make_galaxies(model, add_rsd=True):
     # combine inherited fields and new field(s)
     gt_sat = table.hstack([gt_inh, gt_new], join_type='exact')
     gt_sat['gal_type'] = 'satellites'
-    print('r = {}, {} satellites generated.'.format(model.r, len(gt_sat)))
+    print('r = {:2d}, {} satellites generated.'.format(model.r, len(gt_sat)))
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],
                                            join_type='outer')
