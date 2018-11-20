@@ -287,9 +287,11 @@ def do_rsd(z, vz, redshift, cosmology, period):
     period: Mpc
     z' also wraps around to the other side of the simulation box
     '''
+    a = 1 / (1 + redshift)
     H0 = cosmology.H0.value  # cosmology.H0 returns an astropy quantity
-    E = cosmology.efunc(redshift)  # returns a float
-    z = z + vz * (1 + redshift) / (H0*E)
+    E = cosmology.efunc(redshift)  # returns E as a float, H(z) = H_0 * E
+    H = H0 * E
+    z = z + vz / (a * H)
     return z % period
 
 
@@ -686,7 +688,15 @@ def make_galaxies(model, add_rsd=True):
     #  add_rsd modifies z coordiante of halos which do host central galaxies
     h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
     ht = model.mock.halo_table
+    pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_halos = len(ht)  # total number of host halos available
+    N_particles = len(pt)
+    # centrals and sat random numbers are first thrown after seed has been set
+    # N_halos + N_part random numbers are generated in the beginning in
+    # half-open interval [0. 1), ensuring the randoms numbers are
+    # model-independent and results differentiable
+    ht['N_cen_rand'] = np.random.random(N_halos)
+    pt['N_sat_rand'] = np.random.random(N_particles)
     # remove existing galaxy table, because modifying it is too painfully slow
     if hasattr(model.mock, 'galaxy_table'):
         del model.mock.galaxy_table
@@ -696,15 +706,6 @@ def make_galaxies(model, add_rsd=True):
     if A_cen != 0 or A_sat != 0:    # calculate delta c with original mass
         c_median = model.c_median_poly(np.log10(halo_m))
         delta_c = ht['halo_nfw_conc'] - c_median
-    # centrals and sat random numbers are first thrown after seed has been set
-    # N_halos + N_part random numbers are generated in the beginning in
-    # half-open interval [0. 1), ensuring the randoms numbers are
-    # model-independent and results differentiable
-    ht['N_cen_rand'] = np.random.random(N_halos)
-    pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
-    N_particles = len(pt)
-    # N_part random numbers are generated, same for all models
-    pt['N_sat_rand'] = np.random.random(N_particles)
 
     '''
     centrals
@@ -860,6 +861,6 @@ def make_galaxies(model, add_rsd=True):
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],
                                            join_type='outer')
-    model.mock.halo_ptcl_table = pt
+    model.mock.halo_ptcl_table = pt  # this may be redundant and unnecessary
 
     return model
