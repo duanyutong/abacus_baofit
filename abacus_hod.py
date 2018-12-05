@@ -166,7 +166,7 @@ def fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
     # check if output file already exists
     poly_path = os.path.join(store_dir, sim_name_prefix, 'c_median_poly')
     if os.path.isfile(poly_path+'.txt'):
-        return None
+        return np.poly1d(np.loadtxt(poly_path+'.txt'))
     # load 16 phases for the given cosmology and redshift
     print('Loading halo catalogues to fit c_median...')
     halocats = abacus_ht.make_catalogs(
@@ -252,8 +252,8 @@ def mean_occupation(halo_table, galaxy_table, halo_mass_bins):
     all mass in unit of Msun/h
     '''
     N_halos, _ = np.histogram(halo_table['halo_mvir'], bins=halo_mass_bins)
-    mask_cen = galaxy_table['gal_type'] == 'centrals'
-    mask_sat = galaxy_table['gal_type'] == 'satellites'
+    mask_cen = galaxy_table['gal_type'] == 'central'
+    mask_sat = galaxy_table['gal_type'] == 'satellite'
     N_cen, _ = np.histogram(galaxy_table['halo_mvir'][mask_cen],
                             bins=halo_mass_bins)
     N_sat, _ = np.histogram(galaxy_table['halo_mvir'][mask_sat],
@@ -686,7 +686,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
 def make_galaxies(model, add_rsd=True):
 
     #  add_rsd modifies z coordiante of halos which do host central galaxies
-    h = model.mock.cosmology.H0.value/100  # 0.6726000000000001
+    h = model.mock.cosmology.H0.value/100  # should be 0.6726000000000001
     ht = model.mock.halo_table
     pt = model.mock.halo_ptcl_table  # 10% subsample of halo DM particles
     N_halos = len(ht)  # total number of host halos available
@@ -700,9 +700,9 @@ def make_galaxies(model, add_rsd=True):
     # remove existing galaxy table, because modifying it is too painfully slow
     if hasattr(model.mock, 'galaxy_table'):
         del model.mock.galaxy_table
-    halo_m = ht[model.halo_m_prop].data  # original halo mass
     A_cen = model.param_dict['A_cen']
     A_sat = model.param_dict['A_sat']
+    halo_m = ht[model.halo_m_prop].data  # original halo mass
     if A_cen != 0 or A_sat != 0:    # calculate delta c with original mass
         c_median = model.c_median_poly(np.log10(halo_m))
         delta_c = ht['halo_nfw_conc'] - c_median
@@ -754,7 +754,7 @@ def make_galaxies(model, add_rsd=True):
     gt_new['r_centric'] = np.float32(0)
     # combine inherited fields and new field(s)
     gt_cen = table.hstack([gt_inh, gt_new], join_type='exact')
-    gt_cen['gal_type'] = 'centrals'
+    gt_cen['gal_type'] = 'central'
     print('r = {:2d}, {} centrals generated.'.format(model.r, len(gt_cen)))
 
     '''
@@ -773,11 +773,8 @@ def make_galaxies(model, add_rsd=True):
     mask = ht['halo_subsamp_len'] != 0
     ht['N_sat_model'] = N_sat_mean(halo_m / h, model.param_dict)
     ht['N_sat_model'][mask] /= ht['halo_subsamp_len'][mask]
-    # # fix inf due to dividing by zero
-    # ht['N_sat_model'][ht['halo_subsamp_len'] == 0] = 0
     print('r = {:2d}, creating inherited halo properties for centrals...'
           .format(model.r))
-
     # inherite columns from halo talbe and add to particle table
     # particles belonging to the same halo share the same values
     col_cen_inh = ['halo_upid', 'halo_id', 'halo_hostid',
@@ -794,7 +791,6 @@ def make_galaxies(model, add_rsd=True):
     pt = process_particle_props(pt, h, halo_m_prop=model.halo_m_prop,
                                 perihelion=(model.param_dict['s_p'] != 0))
     # particle table complete. onto satellite generation
-
     # add particle ranking using s, s_v, s_p for each halo
     for key in ['rank_s', 'rank_s_v', 'rank_s_p']:
         # initialise column, astropy doesn't support empty columns
@@ -856,7 +852,7 @@ def make_galaxies(model, add_rsd=True):
     gt_new = table.Table([np.float32(z)], names=col_sat_new)
     # combine inherited fields and new field(s)
     gt_sat = table.hstack([gt_inh, gt_new], join_type='exact')
-    gt_sat['gal_type'] = 'satellites'
+    gt_sat['gal_type'] = 'satellite'
     print('r = {:2d}, {} satellites generated.'.format(model.r, len(gt_sat)))
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],

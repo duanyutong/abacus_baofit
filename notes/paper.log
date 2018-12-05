@@ -1,7 +1,7 @@
-This is XeTeX, Version 3.14159265-2.6-0.99999 (MiKTeX 2.9.6600 64-bit) (preloaded format=xelatex 2018.2.9)  10 SEP 2018 16:46
+This is XeTeX, Version 3.14159265-2.6-0.99999 (MiKTeX 2.9.6600 64-bit) (preloaded format=xelatex 2018.2.9)  29 NOV 2018 15:38
 entering extended mode
-**./abacus_baofit_notes.tex
-(abacus_baofit_notes.tex
+**./paper.tex
+(paper.tex
 LaTeX2e <2017-04-15>
 Babel <3.17> and hyphenation patterns for 73 language(s) loaded.
 (aastex62.cls
@@ -963,13 +963,14 @@ Class revtex4-1 Info: Robustifying \LaTeX's \boldmath command on input line 21.
 Class revtex4-1 Info: cite was not loaded (OK!) on input line 21.
 Class revtex4-1 Info: mcite was not loaded (OK!) on input line 21.
 Class revtex4-1 Info: multicol was not loaded (OK!) on input line 21.
- (abacus_baofit_notes.aux)
-\openout1 = `abacus_baofit_notes.aux'.
+ (paper.aux)
+\openout1 = `paper.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/txmi/m/it on input line 21.
 LaTeX Font Info:    Try loading font information for OML+txmi on input line 21.
 
- ("C:\Program Files\MiKTeX 2.9\tex\latex\txfonts\omltxmi.fd"
+
+("C:\Program Files\MiKTeX 2.9\tex\latex\txfonts\omltxmi.fd"
 File: omltxmi.fd 2000/12/15 v3.1
 )
 LaTeX Font Info:    ... okay on input line 21.
@@ -2249,19 +2250,19 @@ LaTeX Font Info:    Font shape `OT1/txss/m/n' will be
 
 
 LaTeX Font Warning: Font shape `TU/txr/m/sc' undefined
-(Font)              using `TU/txr/m/n' instead on input line 38.
+(Font)              using `TU/txr/m/n' instead on input line 41.
 
 LaTeX Font Info:    Font shape `OT1/txss/m/n' will be
-(Font)              scaled to size 8.54997pt on input line 38.
+(Font)              scaled to size 8.54997pt on input line 41.
 
 LaTeX Font Warning: Font shape `TU/txr/m/it' undefined
-(Font)              using `TU/txr/m/n' instead on input line 38.
+(Font)              using `TU/txr/m/n' instead on input line 41.
 
-LaTeX Font Info:    Try loading font information for TU+txtt on input line 51.
-LaTeX Font Info:    No file TUtxtt.fd. on input line 51.
+LaTeX Font Info:    Try loading font information for TU+txtt on input line 59.
+LaTeX Font Info:    No file TUtxtt.fd. on input line 59.
 
 LaTeX Font Warning: Font shape `TU/txtt/m/n' undefined
-(Font)              using `TU/lmr/m/n' instead on input line 51.
+(Font)              using `TU/lmr/m/n' instead on input line 59.
 
 ("C:\Program Files\MiKTeX 2.9\tex\generic\oberdiek\se-ascii-print.def"
 File: se-ascii-print.def 2016/05/16 v1.11 stringenc: Printable ASCII characters
@@ -2273,7 +2274,7 @@ File: c_median_poly.pdf Graphic file (type pdf)
 
 
 LaTeX Font Warning: Font shape `TU/txr/bx/n' undefined
-(Font)              using `TU/txr/m/n' instead on input line 123.
+(Font)              using `TU/txr/m/n' instead on input line 131.
 
 [3] [4]
 File: xi_r10_phases_tinker13.png Graphic file (type bmp)
@@ -2281,12 +2282,11 @@ File: xi_r10_phases_tinker13.png Graphic file (type bmp)
  [5] [6] [7] [8]
 File: alpha_pair_compare.png Graphic file (type bmp)
 <alpha_pair_compare.png>
- (abacus_baofit_notes.bbl) [9] [10] [11]
-Package atveryend Info: Empty hook `AfterLastShipout' on input line 406.
-
-(abacus_baofit_notes.aux)
-Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 406.
-Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 406.
+ (paper.bbl) [9] [10] [11]
+Package atveryend Info: Empty hook `AfterLastShipout' on input line 414.
+ (paper.aux)
+Package atveryend Info: Empty hook `AtVeryEndDocument' on input line 414.
+Package atveryend Info: Empty hook `AtEndAfterFileList' on input line 414.
 
 
 LaTeX Font Warning: Some font shapes were not available, defaults substituted.
@@ -2294,11 +2294,11 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
  ) 
 Here is how much of TeX's memory you used:
  24733 strings out of 427844
- 430527 string characters out of 3152668
- 570616 words of memory out of 3000000
+ 430359 string characters out of 3152668
+ 570588 words of memory out of 3000000
  28514 multiletter control sequences out of 15000+200000
  567132 words of font info for 132 fonts, out of 3000000 for 9000
  1328 hyphenation exceptions out of 8191
- 41i,14n,57p,10401b,1023s stack positions out of 5000i,500n,10000p,200000b,50000s
+ 41i,14n,57p,10387b,1111s stack positions out of 5000i,500n,10000p,200000b,50000s
 
-Output written on abacus_baofit_notes.pdf (11 pages).
+Output written on paper.pdf (11 pages).

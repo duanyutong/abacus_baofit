@@ -35,7 +35,7 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'AbacusCosmos_1100box_planck'
 tagout = ''  # 'z0.5'
-phases = range(20)  # range(16)  # [0, 1] # list(range(16))
+phases = range(7, 20)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
@@ -622,8 +622,8 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
             gt.write(gt_path, format='ascii.fast_csv', overwrite=True)
             # save galaxy table metadata to sim directory, one file each
             # to be combined later to avoid threading conflicts
-            N_cen = np.sum(gt['gal_type'] == 'centrals')
-            N_sat = np.sum(gt['gal_type'] == 'satellites')
+            N_cen = np.sum(gt['gal_type'] == 'central')
+            N_sat = np.sum(gt['gal_type'] == 'satellite')
             assert N_cen + N_sat == model.mock.ND
             gt_meta = table.Table(
                     [[model_name], [phase], [r], [seed],
