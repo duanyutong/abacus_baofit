@@ -35,14 +35,13 @@ import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 # %% custom settings
 sim_name_prefix = 'AbacusCosmos_1100box_planck'
 tagout = ''  # 'z0.5'
-phases = range(7, 20)  # range(16)  # [0, 1] # list(range(16))
+phases = range(16, 20)  # range(16)  # [0, 1] # list(range(16))
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
 model_names = ['gen_base1', 'gen_base4', 'gen_base5',
                'gen_ass1',  'gen_ass1_n',
                'gen_ass2',  'gen_ass2_n',
-               'gen_ass3',  'gen_ass3_n',
                'gen_s1',    'gen_s1_n',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n',
@@ -823,17 +822,24 @@ coadd_filenames = [  # coadd_realisations
     # 'xi-smu-pre-recon-ar', 'xi_0-smu-pre-recon-ar', 'xi_2-smu-pre-recon-ar',
     'xi-rppi-pre-recon-ar', 'xi-rppi-post-recon-std-sr',
     'wp-rppi-pre-recon-ar', 'wp-rppi-post-recon-std-sr',
-    'fftcorr_N-pre-recon-15.0_hmpc',
-    'fftcorr_R-pre-recon-15.0_hmpc',
-    'fftcorr_N-post-recon-std-15.0_hmpc',
-    'fftcorr_R-post-recon-std-15.0_hmpc',
-    'fftcorr_N-post-recon-ite-15.0_hmpc',
-    'fftcorr_R-post-recon-ite-15.0_hmpc']
+    'fftcorr_xi_0-pre-recon-15.0_hmpc',
+    'fftcorr_xi_2-pre-recon-15.0_hmpc',
+    'fftcorr_xi_0-post-recon-std-15.0_hmpc',
+    'fftcorr_xi_2-post-recon-std-15.0_hmpc',
+    'fftcorr_xi_0-post-recon-ite-15.0_hmpc',
+    'fftcorr_xi_2-post-recon-ite-15.0_hmpc',
+]
 fft = ['fftcorr' in fn for fn in coadd_filenames].index(True)
 
 
 def coadd_realisations(model_name, phase, N_reals):
 
+    filenames = ['fftcorr_N-pre-recon-15.0_hmpc',
+                 'fftcorr_R-pre-recon-15.0_hmpc',
+                 'fftcorr_N-post-recon-std-15.0_hmpc',
+                 'fftcorr_R-post-recon-std-15.0_hmpc',
+                 'fftcorr_N-post-recon-ite-15.0_hmpc',
+                 'fftcorr_R-post-recon-ite-15.0_hmpc']
     try:
         # Co-add auto-correlation results from all realisations
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -843,6 +849,33 @@ def coadd_realisations(model_name, phase, N_reals):
                 os.makedirs(filedir)
             except OSError:
                 assert os.path.exists(filedir)
+        # convert N, R counts to correlations for each realisation
+        print('Converting recon N, R to multipoles for model {}, phase {}...'
+              .format(model_name))
+        for r, i in product(range(N_reals), range(3)):
+            filedir = os.path.join(
+                save_dir,
+                '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase),
+                'z{}-r{}'.format(redshift, r))
+            pathD = os.path.join(
+                filedir,
+                '{}-auto-{}.txt'.format(model_name, filenames[2*i]))
+            pathR = os.path.join(
+                filedir,
+                '{}-auto-{}.txt'.format(model_name, filenames[2*i+1]))
+            N, R = np.loadtxt(pathD), np.loadtxt(pathR)
+            assert np.all(N[:, 1] == R[:, 1])
+            r = N[:, 1]
+            xi_0 = N[:, 3] / R[:, 3] * np.square(galaxy_bias)
+            xi_2 = N[:, 4] / R[:, 3] * np.square(galaxy_bias)
+            xi_0_txt = np.vstack([r, xi_0]).T
+            xi_2_txt = np.vstack([r, xi_2]).T
+            tag = filenames[2*i][10:]
+            for ell, xi_ell in zip([0, 2], [xi_0_txt, xi_2_txt]):
+                np.savetxt(os.path.join(filedir,
+                                        '{}-auto-fftcorr_xi_{}-{}.txt'
+                                        .format(model_name, ell, tag)),
+                           xi_ell, fmt=txtfmt)
         print('Coadding {} realisations for phase {}, model {}...'
               .format(N_reals, phase, model_name))
         for fn in coadd_filenames:
@@ -915,54 +948,6 @@ def coadd_phases(model_name):
                 error, fmt=txtfmt)
 
 
-def convert_recon_correlation(model_name):
-
-    '''
-    take pre- and post-recon FFTcorr jackknife results from each box,
-    the N and R files, and produce fftcorr_xi_0 and xi_2
-    with the correct scaling, taking into account galaxy bias
-    b = 2.23  # galaxy bias for rescaling xi
-
-    '''
-    try:
-        print('Converting recon N and R to multipoles for model {}...'
-              .format(model_name))
-        # do this for both individual boxes and jackknife
-        for jk, i, phase in product([True, False], range(3), phases):
-            if jk:
-                simf = '{}_{:02}-coadd'.format(sim_name_prefix, cosmology)
-            else:
-                simf = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
-            filedir = os.path.join(save_dir, simf, 'z{}'.format(redshift))
-            tag = coadd_filenames[fft+2*i][10:]
-            pathsD = glob(os.path.join(
-                filedir,
-                '{}-auto-{}'.format(model_name, coadd_filenames[fft+2*i])
-                + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
-            pathsR = glob(os.path.join(
-                filedir,
-                '{}-auto-{}'.format(model_name, coadd_filenames[fft+1+2*i])
-                + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'))
-            assert len(pathsD) == len(pathsR) == 1
-            N, R = np.loadtxt(pathsD[0]), np.loadtxt(pathsR[0])
-            assert np.all(N[:, 1] == R[:, 1])
-            r = N[:, 1]
-            xi_0 = N[:, 3] / R[:, 3] * np.square(galaxy_bias)
-            xi_2 = N[:, 4] / R[:, 3] * np.square(galaxy_bias)
-            xi_0_txt = np.vstack([r, xi_0]).T
-            xi_2_txt = np.vstack([r, xi_2]).T
-            for ell, xi_ell in zip([0, 2], [xi_0_txt, xi_2_txt]):
-                np.savetxt(os.path.join(
-                        filedir,
-                        '{}-auto-fftcorr_xi_{}-{}'.format(model_name, ell, tag)
-                        + jk*'-jackknife_{}'.format(phase) + '-coadd.txt'),
-                    xi_ell, fmt=txtfmt)
-    except Exception as E:
-        print('Exception caught in thread {}'.format(model_name))
-        traceback.print_exc()
-        raise E
-
-
 def do_cov(model_name):
 
     # calculate monoquad cov for baofit, 4 types of covariance
@@ -998,7 +983,7 @@ def do_cov(model_name):
         print('Monoquad covariance matrix saved to: ', filepath)
 
 
-def combine_galaxy_table_metadata():
+def combine_galaxy_table_metadata(phases):
 
     # check if metadata for all models, phases, and realisations exist
     paths = [os.path.join(
@@ -1100,11 +1085,11 @@ if __name__ == "__main__":
                   model_names)
             p.close()
             p.join()
-    combine_galaxy_table_metadata()
-    with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
-        p.map(coadd_phases, model_names)
-        p.map(do_cov, model_names)
-        p.map(convert_recon_correlation, model_names)
-        p.close()
-        p.join()
-    run_baofit_parallel(baofit_phases=phases)
+    # combine_galaxy_table_metadata(phases)
+    # with closing(MyPool(processes=len(model_names), maxtasksperchild=1)) as p:
+    #     p.map(convert_recon_correlation, model_names)
+    #     p.map(coadd_phases, model_names)
+    #     p.map(do_cov, model_names)
+    #     p.close()
+    #     p.join()
+    # run_baofit_parallel(baofit_phases=phases)

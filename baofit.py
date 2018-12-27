@@ -7,6 +7,7 @@ import sys
 import traceback
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
+polytype = 3
 rmin = 50
 rmax = 150 # the minimum and maximum scales to be used in the fit
 rbmax = 80 # the maximum scale to be used to set the bias prior
@@ -20,6 +21,7 @@ bs = 5.0 # the r bin size of the data
 bc = '.txt' # bc = 'post_recon_bincent'+str(binc)+'.dat' # common ending string of data files
 # fout = ft
 chi_min = 1000
+
 
 def P2(mu):
     return 0.5*(3.*mu**2.-1.)
@@ -82,16 +84,42 @@ class baofit3D_ellFull_1cov:
         self.b0 = 1.
         self.b2 = 1.
         self.b4 = 1.
-        self.H = np.zeros((6,self.nbin))
-        for i in range(0,self.nbin):
-            if i < self.nbin/2:
-                self.H[0][i] = 1.
-                self.H[1][i] = 1./self.rl[i]
-                self.H[2][i] = 1./self.rl[i]**2.
-            if i >= self.nbin/2:
-                self.H[3][i] = 1.
-                self.H[4][i] = 1./self.rl[i]
-                self.H[5][i] = 1./self.rl[i]**2.
+        if polytype == -1:
+            self.H = np.zeros((4,self.nbin))
+            for i in range(0,self.nbin):
+                if i < self.nbin/2:
+                    self.H[0][i] = 1.
+                    self.H[1][i] = 1./self.rl[i]
+                if i >= self.nbin/2:
+                    self.H[3][i] = 1.
+                    self.H[4][i] = 1./self.rl[i]
+        if polytype == 1:
+            self.H = np.zeros((2,self.nbin))
+            for i in range(0,self.nbin):
+                if i < self.nbin/2:
+                    self.H[1][i] = 1./self.rl[i]**2.
+                if i >= self.nbin/2:
+                    self.H[2][i] = 1./self.rl[i]**2.
+        if polytype == 2:
+            self.H = np.zeros((4,self.nbin))
+            for i in range(0,self.nbin):
+                if i < self.nbin/2:
+                    self.H[0][i] = 1./self.rl[i]
+                    self.H[1][i] = 1./self.rl[i]**2.
+                if i >= self.nbin/2:
+                    self.H[2][i] = 1./self.rl[i]
+                    self.H[3][i] = 1./self.rl[i]**2.
+        if polytype == 3:
+            self.H = np.zeros((6,self.nbin))
+            for i in range(0,self.nbin):
+                if i < self.nbin/2:
+                    self.H[0][i] = 1.
+                    self.H[1][i] = 1./self.rl[i]
+                    self.H[2][i] = 1./self.rl[i]**2.
+                if i >= self.nbin/2:
+                    self.H[3][i] = 1.
+                    self.H[4][i] = 1./self.rl[i]
+                    self.H[5][i] = 1./self.rl[i]**2.
         
     def wmod(self,r,sp=1.):
         self.sp = sp
@@ -192,7 +220,15 @@ class baofit3D_ellFull_1cov:
             pv.append(self.xim[i]-(5.*(Beta*self.xia[i]-BB*0.5*self.xia[int(i-self.nbin/2)])))
          
         Al = findPolya(self.H,self.invt,pv)
-        A0,A1,A2,A02,A12,A22 = Al[0],Al[1],Al[2],Al[3],Al[4],Al[5]
+        A0,A1,A2,A02,A12,A22 = 0,0,0,0,0,0
+        if polytype == -1:
+            A0,A1,A02,A12 = Al[0],Al[1],Al[2],Al[3]
+        if polytype == 1:
+            A2,A22 = Al[0],Al[1]
+        if polytype == 2:
+            A1,A2,A12,A22 = Al[0],Al[1],Al[2],Al[3]
+        if polytype == 3:
+            A0,A1,A2,A02,A12,A22 = Al[0],Al[1],Al[2],Al[3],Al[4],Al[5]
         for i in range(0, int(self.nbin/2)):
             r = self.rl[i]
             mod0 = BB*self.xia[i]+A0+A1/r+A2/r**2.

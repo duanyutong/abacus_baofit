@@ -574,6 +574,12 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         elif model_name == 'gen_base5':
             model.param_dict['logM1'] = 13.805
             model.param_dict['alpha'] = 1.05
+        elif model_name == 'gen_base6':
+            model.param_dict['logM1'] = 13.805  # tune this
+            model.param_dict['alpha'] = 0.75
+        elif model_name == 'gen_base7':
+            model.param_dict['logM1'] = 13.805  # tune this
+            model.param_dict['alpha'] = 1.25
         elif model_name == 'gen_ass1':
             model.param_dict['A_cen'] = 1
             model.param_dict['A_sat'] = 0
