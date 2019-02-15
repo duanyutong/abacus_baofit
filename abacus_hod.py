@@ -117,8 +117,8 @@ def process_rockstar_halocat(halocat, N_cut=70):
     N0 = len(halocat.halo_table)
     mask_halo = ((halocat.halo_table['halo_upid'] == -1)  # only host halos
                  & (halocat.halo_table['halo_N'] >= N_cut))
-    #             & (halocat.halo_table['halo_subsamp_len'] > 0))
-    mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)  # child subhalos
+    # include subhalos belonging to halos which have made the cut
+    mask_subhalo = ((halocat.halo_table['halo_upid'] != -1)
                     & np.isin(halocat.halo_table['halo_upid'],
                               halocat.halo_table['halo_id'][mask_halo]))
     htab = halocat.halo_table[mask_halo | mask_subhalo]  # original order
@@ -148,7 +148,7 @@ def process_rockstar_halocat(halocat, N_cut=70):
     halocat.halo_table = htab
     halocat.halo_ptcl_table = ptab
     print('Initial total N halos {}; mass cut mask count {}; '
-          'subhalos cut mask count {}; final N halos {}. '
+          'subhalos processed {}; final N halos {}. '
           'Smallest subsamp_len = {}.'
           .format(N0, mask_halo.sum(), mask_subhalo.sum(), len(htab),
                   htab['halo_subsamp_len'].min()))
@@ -575,10 +575,10 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
             model.param_dict['logM1'] = 13.805
             model.param_dict['alpha'] = 1.05
         elif model_name == 'gen_base6':
-            model.param_dict['logM1'] = 13.805  # tune this
+            model.param_dict['logM1'] = 13.793  # tune this
             model.param_dict['alpha'] = 0.75
         elif model_name == 'gen_base7':
-            model.param_dict['logM1'] = 13.805  # tune this
+            model.param_dict['logM1'] = 13.829  # tune this
             model.param_dict['alpha'] = 1.25
         elif model_name == 'gen_ass1':
             model.param_dict['A_cen'] = 1
@@ -637,7 +637,7 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model, gt_path='', add_rsd=True):
+def populate_model(halocat, model, gt_path=''):
 
     # use halotools HOD
     if model.model_type == 'prebuilt':
@@ -671,7 +671,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             # random seed using phase and r, model independent
             seed = halocat.ZD_Seed * 100 + model.r
             np.random.seed(seed)  # set random generator deterministically
-            model = make_galaxies(model, add_rsd=add_rsd)
+            model = make_galaxies(model)
             model.mock.gt_loaded = False
         elif os.path.exists(gt_path):
             print('r = {:2d}, loading existing galaxy table: {}'
@@ -679,7 +679,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
             model.mock.galaxy_table = gt = table.Table.read(
                 gt_path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
-            for pos in ['x', 'y', 'z']:
+            for pos in ['x', 'y', 'z', 'zreal']:
                 gt[pos] = gt[pos].astype(np.float32)
             model.mock.gt_loaded = True
     model.mock.reconstructed = False
@@ -689,7 +689,7 @@ def populate_model(halocat, model, gt_path='', add_rsd=True):
     return model
 
 
-def make_galaxies(model, add_rsd=True):
+def make_galaxies(model):
 
     #  add_rsd modifies z coordiante of halos which do host central galaxies
     h = model.mock.cosmology.H0.value/100  # should be 0.6726000000000001
@@ -735,11 +735,8 @@ def make_galaxies(model, add_rsd=True):
     vz = do_vpec(ht['halo_vz'][mask_cen], ht['halo_vrms'][mask_cen],
                  model.param_dict['alpha_c'])
     # add observational rsd for halos
-    if add_rsd:
-        z = do_rsd(ht['halo_z'][mask_cen]/h, vz, model.mock.redshift,
-                   model.mock.cosmology, model.mock.BoxSize/h) * h  # in Mpc/h
-    else:
-        z = ht['halo_z'][mask_cen]
+    z = do_rsd(ht['halo_z'][mask_cen]/h, vz, model.mock.redshift,
+               model.mock.cosmology, model.mock.BoxSize/h) * h  # in Mpc/h
     # central calculation done, create centrals table
     # create galaxy_table columns to be inherited from halo_table
     # excludes halo_z and halo_vz due to velocity bias and rsd
@@ -752,10 +749,11 @@ def make_galaxies(model, add_rsd=True):
                          names=col_cen_inh)
     # create new columns containing galaxy properties, with bias & rsd
     # r_centric is the host centric distance between particle and halo centre
-    col_cen_new = ['x', 'y', 'z', 'vx', 'vy', 'vz']
+    col_cen_new = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'zreal']
     gt_new = table.Table(
         [ht['halo_x'][mask_cen],  ht['halo_y'][mask_cen],  np.float32(z),
-         ht['halo_vx'][mask_cen], ht['halo_vy'][mask_cen], np.float32(vz)],
+         ht['halo_vx'][mask_cen], ht['halo_vy'][mask_cen], np.float32(vz),
+         ht['halo_z'][mask_cen]],
         names=col_cen_new)
     gt_new['r_centric'] = np.float32(0)
     # combine inherited fields and new field(s)
@@ -769,7 +767,7 @@ def make_galaxies(model, add_rsd=True):
     '''
     # before decorations, N_sat only depend on halo mass
     halo_m = ht[model.halo_m_prop].data  # reset halo mass to original values
-    if A_sat != 0:
+    if A_sat != 0:  # assembly bias for satellites
         halo_pseudomass_sat = np.int64(
                 halo_m * np.exp(A_sat*(2*(delta_c > 0) - 1)))
         ind_m = halo_m.argsort()
@@ -829,12 +827,9 @@ def make_galaxies(model, add_rsd=True):
     # select particles which host satellites
     mask_sat = pt['N_sat_rand'] < pt['N_sat_model']
     # add RSD to mock sample
-    if add_rsd:
-        z = do_rsd(pt['z'][mask_sat]/h, pt['vz'][mask_sat],
-                   model.mock.redshift, model.mock.cosmology,
-                   model.mock.BoxSize/h) * h  # in Mpc/h
-    else:
-        z = pt['z'][mask_sat]
+    z = do_rsd(pt['z'][mask_sat]/h, pt['vz'][mask_sat],
+               model.mock.redshift, model.mock.cosmology,
+               model.mock.BoxSize/h) * h  # in Mpc/h
     print('r = {:2d}, creating inherited halo properties for satellites...'
           .format(model.r))
     # satellite calculation done, create satellites table
@@ -852,10 +847,10 @@ def make_galaxies(model, add_rsd=True):
         assert len(pt[col][mask_sat]) == len(pt[mask_sat])
     gt_inh = table.Table([pt[col][mask_sat] for col in col_sat_inh],
                          names=col_sat_inh)
-    col_sat_new = ['z']
+    col_sat_new = ['z', 'zreal']
     # save z as float32 as all positions in catalogues are float32
     # this also ensures Corrfunc compatibility
-    gt_new = table.Table([np.float32(z)], names=col_sat_new)
+    gt_new = table.Table([np.float32(z), pt['z'][mask_sat]], names=col_sat_new)
     # combine inherited fields and new field(s)
     gt_sat = table.hstack([gt_inh, gt_new], join_type='exact')
     gt_sat['gal_type'] = 'satellite'

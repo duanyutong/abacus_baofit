@@ -7,100 +7,81 @@ import sys
 import traceback
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
-polytype = 3
-rmin = 50
-rmax = 150 # the minimum and maximum scales to be used in the fit
-rbmax = 80 # the maximum scale to be used to set the bias prior
-Hdir = '/home/dyt/store/AbacusCosmos_1100box_planck/' # this is the save directory
-savefolder = '2Dbaofits/'
-# datadir = '/home/dyt/analysis_data/emulator_1100box_planck/emulator_1100box_planck_00-combined/z0.7/' # where the xi data are
+# polydeg = '3p'  # 1, 2, 3, 3p
+# rmin = 50  # 20, 30, 40, 50
+
+rmax = 150  # the minimum and maximum scales to be used in the fit
+rbmax = 80  # the maximum scale to be used to set the bias prior
+# Hdir = '/home/dyt/store/AbacusCosmos_1100box_planck/'  # this is the save directory
+Hdir = '/home/dyt/store/emulator_1100box_planck-norsd/'  # this is the save directory
+savefolder = '2Dbaofits_poly{}_{}/'
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
-zb = '' # zb = 'zbin3_' # change number to change zbin
-binc = '' # binc = 0 # change number to change bin center
-bs = 5.0 # the r bin size of the data
-bc = '.txt' # bc = 'post_recon_bincent'+str(binc)+'.dat' # common ending string of data files
+zb = ''  # zb = 'zbin3_' # change number to change zbin
+binc = ''  # binc = 0 # change number to change bin center
+bs = 5.0  # the r bin size of the data
+bc = '.txt'  # bc = 'post_recon_bincent'+str(binc)+'.dat'
 # fout = ft
-chi_min = 1000
+chi_min = 20000
 
 
-def P2(mu):
-    return 0.5*(3.*mu**2.-1.)
-    
-def P4(mu):
-    return 0.125*(35.*mu**4.-30.*mu**2.+3.)
-
-def findPolya(H,ci,d):
+def findPolya(H, ci, d):
     ht = H.transpose()
-    onei = np.linalg.pinv(np.dot(np.dot(H,ci),ht))
-    comb = np.dot(np.dot(onei,H),ci)
-    return np.dot(comb,d)
+    onei = np.linalg.pinv(np.dot(np.dot(H, ci), ht))
+    comb = np.dot(np.dot(onei, H), ci)
+    return np.dot(comb, d)
 
-class baofit3D_ellFull_1cov:
-    def __init__(self,dv,ic,mod,rl):
+
+class baofit3D:
+
+    def __init__(self, dv, ic, mod, rl, polydeg):
+        self.polydeg = polydeg
         self.xim = dv
         self.rl = rl
         m2 = 1.
         self.nbin = len(self.rl)
-        
-        # print('nbin is: ', self.nbin)
-        # print('xim is: ', self.xim)
-        # print('r list is: ', self.rl)
+
         self.invt = ic
         if self.nbin != len(self.invt):
             return 'vector matrix mismatch!'
 
         self.ximodmin = 10.
 
-        self.x0 = [] #empty lists to be filled for model templates
+        self.x0 = []  # empty lists to be filled for model templates
         self.x2 = []
         self.x4 = []
-        self.x0sm = []
-        self.x2sm = []
-        self.x4sm = []
-        
+
         # change current working directory to file directory
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
-        
+
         mf0 = open('BAOtemplates/xi0'+mod).readlines()
         mf2 = open('BAOtemplates/xi2'+mod).readlines()
         mf4 = open('BAOtemplates/xi4'+mod).readlines()
-        mf0sm = open('BAOtemplates/xi0sm'+mod).readlines()
-        mf2sm = open('BAOtemplates/xi2sm'+mod).readlines()
-        mf4sm = open('BAOtemplates/xi4sm'+mod).readlines()
+
         for i in range(0,len(mf0)):
             ln0 = mf0[i].split()
             self.x0.append(2.1*(float(ln0[1])))
-            self.x0sm.append(2.1*float(mf0sm[i].split()[1]))
+            # self.x0sm.append(2.1*float(mf0sm[i].split()[1]))
             ln2 = mf2[i].split()
             m2 = 2.1*(float(ln2[1]))
             self.x2.append(m2)
-            self.x2sm.append(2.1*float(mf2sm[i].split()[1]))
+            # self.x2sm.append(2.1*float(mf2sm[i].split()[1]))
             ln4 = mf4[i].split()
             m4 = 2.1*(float(ln4[1]))
             self.x4.append(m4)
-            self.x4sm.append(2.1*float(mf4sm[i].split()[1]))
+            # self.x4sm.append(2.1*float(mf4sm[i].split()[1]))
         self.at = 1.
         self.ar = 1.
         self.b0 = 1.
         self.b2 = 1.
         self.b4 = 1.
-        if polytype == -1:
-            self.H = np.zeros((4,self.nbin))
-            for i in range(0,self.nbin):
-                if i < self.nbin/2:
-                    self.H[0][i] = 1.
-                    self.H[1][i] = 1./self.rl[i]
-                if i >= self.nbin/2:
-                    self.H[3][i] = 1.
-                    self.H[4][i] = 1./self.rl[i]
-        if polytype == 1:
+        if self.polydeg == '1':
             self.H = np.zeros((2,self.nbin))
             for i in range(0,self.nbin):
                 if i < self.nbin/2:
-                    self.H[1][i] = 1./self.rl[i]**2.
+                    self.H[0][i] = 1./self.rl[i]**2.
                 if i >= self.nbin/2:
-                    self.H[2][i] = 1./self.rl[i]**2.
-        if polytype == 2:
+                    self.H[1][i] = 1./self.rl[i]**2.
+        elif self.polydeg == '2':
             self.H = np.zeros((4,self.nbin))
             for i in range(0,self.nbin):
                 if i < self.nbin/2:
@@ -109,7 +90,7 @@ class baofit3D_ellFull_1cov:
                 if i >= self.nbin/2:
                     self.H[2][i] = 1./self.rl[i]
                     self.H[3][i] = 1./self.rl[i]**2.
-        if polytype == 3:
+        elif self.polydeg == '3':
             self.H = np.zeros((6,self.nbin))
             for i in range(0,self.nbin):
                 if i < self.nbin/2:
@@ -120,6 +101,15 @@ class baofit3D_ellFull_1cov:
                     self.H[3][i] = 1.
                     self.H[4][i] = 1./self.rl[i]
                     self.H[5][i] = 1./self.rl[i]**2.
+        elif self.polydeg == '3p':
+            self.H = np.zeros((4,self.nbin))
+            for i in range(0,self.nbin):
+                if i < self.nbin/2:
+                    self.H[0][i] = 1.
+                    self.H[1][i] = 1./self.rl[i]
+                if i >= self.nbin/2:
+                    self.H[2][i] = 1.
+                    self.H[3][i] = 1./self.rl[i]
         
     def wmod(self,r,sp=1.):
         self.sp = sp
@@ -211,8 +201,8 @@ class baofit3D_ellFull_1cov:
         if Beta < 0:
             return chi_min
         modl = []
-        if wo == 'y':
-            fo = open(Hdir+savefolder+fw+'-ep0-ximod.dat','w')
+        # if wo == 'y':
+        #     fo = open(Hdir+self.savefolder+fw+'-ep0-ximod.dat','w')
         pv = []
         for i in range(0, int(self.nbin/2)):
             pv.append(self.xim[i]-BB*self.xia[i])
@@ -221,14 +211,14 @@ class baofit3D_ellFull_1cov:
          
         Al = findPolya(self.H,self.invt,pv)
         A0,A1,A2,A02,A12,A22 = 0,0,0,0,0,0
-        if polytype == -1:
-            A0,A1,A02,A12 = Al[0],Al[1],Al[2],Al[3]
-        if polytype == 1:
+        if self.polydeg == '1':
             A2,A22 = Al[0],Al[1]
-        if polytype == 2:
+        if self.polydeg == '2':
             A1,A2,A12,A22 = Al[0],Al[1],Al[2],Al[3]
-        if polytype == 3:
+        if self.polydeg == '3':
             A0,A1,A2,A02,A12,A22 = Al[0],Al[1],Al[2],Al[3],Al[4],Al[5]
+        if self.polydeg == '3p':
+            A0,A1,A02,A12 = Al[0],Al[1],Al[2],Al[3]
         for i in range(0, int(self.nbin/2)):
             r = self.rl[i]
             mod0 = BB*self.xia[i]+A0+A1/r+A2/r**2.
@@ -252,7 +242,7 @@ class baofit3D_ellFull_1cov:
             dl.append(self.xim[i]-modl[i])  
         chit = np.dot(np.dot(dl,self.invt),dl)
         if v == 'y':
-            print('dl, chit: ', dl,chit)
+            print('dl, chit: ', dl, chit)
         BBfac = (np.log(BB/self.BB)/self.Bp)**2.
         Btfac = (np.log(Beta/self.B0)/self.Bt)**2.
         return chit + BBfac + Btfac
@@ -262,11 +252,13 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
                     armin=1.0, armax=1.04, spar=0.0004,
                     atmin=1.0, atmax=1.04, spat=0.0004, 
                     nobao='n',Bp=.4,Bt=.4,meth='Nelder-Mead',
-                    fout=''):
+                    fout='', polydeg='3', rmin=50):
 
+    folder = savefolder.format(polydeg, rmin)
+    print('saving to', os.path.join(Hdir + folder))
     # print('try meth = "Nelder-Mead" if does not work or answer is weird')
-    bb = baofit3D_ellFull_1cov(dvb,icovb,mod,rlb) #initialize for bias prior
-    b = baofit3D_ellFull_1cov(dv,icov,mod,rl) #initialize for fitting
+    bb = baofit3D_ellFull_1cov(dvb,icovb,mod,rlb,polydeg) #initialize for bias prior
+    b = baofit3D_ellFull_1cov(dv,icov,mod,rl,polydeg) #initialize for fitting
     b.B0 = B0
     b.Bt = Bt
     
@@ -285,29 +277,32 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
         if chiB < chiBmin:
             chiBmin = chiB
             BB = B
+        #     print(chiB)
+        # else:
+        #     print('higher', chiB)
         B += .01
     if BB == None:
         print('ChiB >= ChiBmin for B in [0.1, 2)')
-    
+        raise Exception
 #    print('BB, chiBmin:', BB,chiBmin)
     b.BB = BB  # best fit B0 from prior
     b.B0 = BB  # best fit B0 from prior used as B2 prior?
     b.Bp = Bp
     b.Bt = Bt
-    if not os.path.exists(os.path.join(Hdir + savefolder)):
+    if not os.path.exists(os.path.join(Hdir + folder)):
         try:
-            os.makedirs(os.path.join(Hdir + savefolder))
-            print('2Dbaofits folder DNE, created.')
+            os.makedirs(os.path.join(Hdir + folder))
+            print('2DBAOfits folder DNE, created: {}.'
+                  .format(os.path.join(Hdir + folder)))
         except OSError:
             pass
-    fo = open(Hdir+savefolder+fout+'-arat-covchi.dat','w+')
-    fg = open(Hdir+savefolder+fout+'-arat-covchigrid.dat','w+')
+    fo = open(Hdir+folder+fout+'-arat-covchi.dat','w+')
+    fg = open(Hdir+folder+fout+'-arat-covchigrid.dat','w+')
 #     chim = 1000
-    nar = int((armax-armin)/spar)
-    nat = int((atmax-atmin)/spat)
+    nar = int(np.rint((armax-armin)/spar))
+    nat = int(np.rint((atmax-atmin)/spat))
     grid = np.zeros((nar,nat))
     fac = ((chi_min-2)-len(dv))/(chi_min-1)
-    
     chim = chi_min
     for i in range(nar):      
         b.ar = armin+spar*i+spar/2.
@@ -318,7 +313,7 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
             inl = (B,B0)
             (B, B0) = minimize(b.chi_templ_alphfXX_an, inl, 
                                 method = meth, options = {'disp': False}).x
-            chi = b.chi_templ_alphfXX_an((B,B0))*fac
+            chi = b.chi_templ_alphfXX_an((B,B0), v='n')*fac
             grid[i][j] = chi
             fo.write(str(b.ar)+' '+str(b.at)+' '+str(chi)+'\n')
             fg.write(str(chi)+' ')
@@ -337,7 +332,7 @@ def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
 def baofit(inputs):
 # def baofit():
     try:
-        path_xi_0, path_xi_2, path_cov, fout_tag = inputs
+        path_xi_0, path_xi_2, path_cov, fout_tag, polydeg, rmin = inputs
         r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
         d0 = np.loadtxt(path_xi_0)[:, 1]
         d2 = np.loadtxt(path_xi_2)[:, 1]
@@ -377,9 +372,9 @@ def baofit(inputs):
         # define template
         mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
         alrm, altm, chim = Xism_arat_1C_an(
-            dv, invc, rl, mod, dvb, invcb, rlb, 
-            armin=0.990, armax=1.04, spar=0.0004,
-            atmin=1.000, atmax=1.025, spat=0.0004, fout=fout_tag)
+            dv, invc, rl, mod, dvb, invcb, rlb, fout=fout_tag, polydeg=polydeg, rmin=rmin,
+            armin=0.975, armax=1.035, spar=0.0004,  # armin=0.910, armax=1.010, spar=0.0015,
+            atmin=1.000, atmax=1.040, spat=0.0004)  # atmin=0.990, atmax=1.040, spat=0.0015)
         print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
         return alrm, altm
     except Exception as E:
@@ -389,5 +384,5 @@ def baofit(inputs):
 
 if __name__ == '__main__':
 
-        baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])
+        baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5, sys.argv[6]])
     
