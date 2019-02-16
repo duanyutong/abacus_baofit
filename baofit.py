@@ -33,12 +33,13 @@ def matmul(*args):
 class baofit3D:
 
     def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
-                 r_min=50, r_max=150):
+                 z=0.5, r_min=50, r_max=150, xi_temp_weighted=False):
 
-        self.k = k
-        self.P_lin = P_lin
+        power = PowerTemplate(z=z, reconstructed=reconstructed)
+        power.P(k, P_lin, n_mu_bins)
+        self.xi_multipole = power.xi_multipole
         self.polydeg = polydeg
-        self.reconstructed = reconstructed
+        self.xi_temp_weighted = xi_temp_weighted
         # monoquad r vector, with factor to correct for pairs should have
         # slightly larger average pair distance than the bin center
         r_mask = (r_min < r) & (r < r_max)
@@ -79,21 +80,18 @@ class baofit3D:
         self.B0_ln_width = 100
         self.B2_ln_width = 100
         self.A = np.zeros(6)
-        self.make_weighted_xi_temp()
 
     def xi_r_mu(self, r, mu, ell_max=6):
-        ''' input r, mu are 1D arrays, return 2D xi_r_mu(r, mu) '''
-        power = PowerTemplate(z=0.5, reconstructed=self.reconstructed)
-        power.P(self.k, self.P_lin, n_mu_bins)
+        ''' input r may be 2D, return 2D xi_r_mu(r, mu) '''
         orders = np.arange(ell_max//2)*2
         xi = 0
         for order in orders:
-            xi_ell = power.xi_multipole(r, ell=order)
+            xi_ell = self.xi_multipole(r, ell=order)
             Ln = legendre(order)
             xi += xi_ell * Ln(mu)
         return xi
 
-    def make_xi_temp(self, r, component='mu2'):
+    def xi_temp_components(self, r, component='mu2'):
         ''' rescaled xi_0, xi_2, xi_mu_2 as a function of 1D r array '''
         mu_bins = np.linspace(0, 1, num=n_mu_bins+1)
         mu = (mu_bins[1:] + mu_bins[:-1])/2
@@ -102,7 +100,7 @@ class baofit3D:
                         + (1-np.square(mu)*np.square(self.at)))  # size n_mu
         rp = np.outer(r, alpha)  # r prime rescaled, 2D dim (n_r, n_mu)
         mup = mu*self.ar/alpha  # mu prime
-        if component in ['0', '2']:
+        if component == '0':  # can add any even order, '2', '4'
             ell = np.int(component)
             Ln = legendre(ell)
             xi = (2*ell+1)/2*np.sum(
@@ -112,23 +110,28 @@ class baofit3D:
         assert self.r.size == xi.size
         return xi
 
-    def make_weighted_xi_temp(self):
+    def make_xi_temp(self, weighted=False):
         ''' xi_0, xi_2, xi_mu_2 over r bin, weighted by r^2 integral '''
+        if not hasattr(self, 'xitemp'):
+            self.xitemp = {}
         n = np.int(np.floor(np.mean(np.diff(self.r))/r_avg_increment)//2*2+1)
-        for component in ['0', '2', 'mu2']:
-            print('Making weighted xi template for {}'
-                  .format(component, n))
-            array = np.zeros((self.r.size, 2, n))
-            for i in range(n):
-                r = self.r - (n-1)/2*r_avg_increment + i*r_avg_increment
-                # print('r bin {} of {}, r = {}'.format(i, n, r))
-                array[:, 0, i] = r
-                array[:, 1, i] = self.make_xi_temp(r, component=component)
-            if not hasattr(self, 'xitemp'):
-                self.xitemp = {}
-            self.xitemp[component] = np.sum(
-                np.square(array[:, 0, :])*array[:, 1, :],
-                axis=1) / np.sum(np.square(array[:, 0, :]), axis=1)
+        for comp in ['0', 'mu2']:
+            if weighted:
+                # print('Making weighted xi {} tempplate across bin width...'
+                #       .format(comp))
+                array = np.zeros((self.r.size, 2, n))
+                for i in range(n):
+                    r = self.r - (n-1)/2*r_avg_increment + i*r_avg_increment
+                    # print('r bin {} of {}, r = {}'.format(i, n, r))
+                    array[:, 0, i] = r
+                    array[:, 1, i] = self.xi_temp_components(r, component=comp)
+                self.xitemp[comp] = np.sum(
+                    np.square(array[:, 0, :])*array[:, 1, :],
+                    axis=1) / np.sum(np.square(array[:, 0, :]), axis=1)
+            else:
+                # print('Making unweighted xi {} template ...'.format(comp))
+                self.xitemp[comp] = self.xi_temp_components(self.r,
+                                                            component=comp)
 
     def make_model_vector(self, B0, B2):
         ''' calculate model vector from templates using B, A coefficients '''
@@ -161,7 +164,10 @@ class baofit3D:
 
     def do_fit(self, armin=0.910, armax=1.040, arsp=0.005,
                atmin=0.990, atmax=1.040, atsp=0.005):
-
+        '''
+        armin=0.975, armax=1.035, arsp=0.0004
+        atmin=1.000, atmax=1.040, atsp=0.0004
+        '''
         ars = np.arange(armin, armax, arsp)
         ats = np.arange(atmin, atmax, atsp)
         chisq_grid = np.zeros((ars.size, ats.size))
@@ -169,19 +175,21 @@ class baofit3D:
         for i, j in product(range(ars.size), range(ats.size)):
             self.ar = ars[i]
             self.at = ats[j]
-            self.make_weighted_xi_temp()
+            self.make_xi_temp(weighted=self.xi_temp_weighted)
             B0, B2 = minimize(self.B0_B2_optimize, (1, 1),
                               bounds=((0.1, 2), (0.1, 2)), method='SLSQP').x
             chisq_min = self.B0_B2_optimize((B0, B2))
             chisq_grid[i, j] = chisq_min
             chisq_list.append([ars[i], ats[j], chisq_min])
+            print('Grid size: {}, results: ({}, {}, {})'
+                  .format(chisq_grid.shape, ars[i], ats[j], chisq_min))
         return chisq_grid, np.array(chisq_list)
 
 
 def baofit(argv):
     try:
         # save_dir = '/home/dyt/store/emulator_1100box_planck-norsd/'
-        path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
+        z, path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
             path_chisq_grid, path_chisq_table, recon = argv
         data = np.loadtxt(path_p_lin)
         k = data[:, 0]
@@ -204,7 +212,8 @@ def baofit(argv):
         # find best B_0 from bias prior, reduced range
         print('Initializing bias prior instance')
         fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
-                        r_min=rmin, r_max=80)
+                        z=z, r_min=rmin, r_max=80, xi_temp_weighted=False)
+        fit1.make_xi_temp()
         B0 = np.arange(0.1, 2, 0.01)
         chisq = np.zeros(B0.shape)
         for i in range(B0.size):
@@ -214,14 +223,14 @@ def baofit(argv):
         print('Best fit B0 prior: {}'.format(B0[np.argmin(chisq)]))
         # update prior and do chisq grid scan, full range
         fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
-                        r_min=rmin, r_max=150)
+                        z=z, r_min=rmin, r_max=150, xi_temp_weighted=False)
         fit2.B0 = B0[np.argmin(chisq)]  # new B0 prior for fit2
         fit2.B2 = fit2.B0  # same prior for B2
         fit2.B0_ln_width = 0.4
         fit2.B2_ln_width = 0.4
         chisq_grid, chisq_table = fit2.do_fit(
-            armin=0.975, armax=1.035, arsp=0.0004,
-            atmin=1.000, atmax=1.040, atsp=0.0004)
+            armin=0.970, armax=1.040, arsp=0.002,
+            atmin=1.000, atmax=1.040, atsp=0.002)
         if not os.path.exists(os.path.dirname(path_chisq_grid)):
             os.mkdir(os.path.dirname(path_chisq_grid))
         np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)

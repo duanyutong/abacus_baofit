@@ -1082,12 +1082,11 @@ def run_baofit_parallel(baofit_phases):
                 path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
                 path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
                 list_of_inputs.append(
-                    [path_p_lin, path_xi_0, path_xi_2, path_cov, '3', rmin,
-                     path_cg, path_ct, recon])
-    baofit(list_of_inputs[0])
-#    with closing(MyPool(processes=1,
-#                        maxtasksperchild=1)) as p:
-#        p.map(baofit, list_of_inputs)
+                    [redshift, path_p_lin, path_xi_0, path_xi_2, path_cov,
+                     '3', rmin, path_cg, path_ct, recon])
+    with closing(MyPool(processes=16,
+                        maxtasksperchild=1)) as p:
+        p.map(baofit, list_of_inputs)
     p.close()
     p.join()
 
