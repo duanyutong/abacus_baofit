@@ -38,7 +38,7 @@ class PowerTemplate:
         self.omb = ombhsq/np.square(h)
         self.cosmology = FlatLambdaCDM(H0=100*h, Om0=self.om, Tcmb0=Tcmb0,
                                        Ob0=self.omb)
-        # self.ol = 1 - self.omhsq/np.square(self.h)
+        self.ol = 1 - self.omhsq/np.square(self.h)  # ignring radiation density
         self.sigma8 = sigma8
         self.ns = ns
         self.Tcmb0 = 2.725
@@ -148,15 +148,16 @@ class PowerTemplate:
 
         Ln = legendre(ell)
         P_ell = (2*ell + 1)/2 * np.sum(
-            self.P_k_mu * (Ln(self.mu) + Ln(-self.mu)) * np.diff(self.mu_bins),
+            self.P_k_mu * (Ln(-self.mu) + Ln(self.mu)) * np.diff(self.mu_bins),
             axis=1)
         return P_ell
 
-    def xi_multipole(self, r, ell, a=1, r_damp=False):
+    def xi_multipole(self, r_input, ell, a=0.34, r_damp=True):
         '''
         integrate in logk space using trapozoidal rule
         a is the exponential damping parameter to suppress high-k oscillations
         usually 0.3 to 1
+        input r may be 2D of dim (n_r_bins, n_mu_bins)
         '''
         P_ell = self.p_multipole(ell)
         P_ell = (P_ell[1:] + P_ell[:-1])/2  # interpolate midpoint
@@ -165,11 +166,11 @@ class PowerTemplate:
         lnk = (lnk_edges[1:] + lnk_edges[:-1])/2  # lnk value at midpoint
         k = np.exp(lnk)  # k value at midpoint
         # turn into 2D grids
-        k = np.tile(k, (r.size, 1))
-        P_ell = np.tile(P_ell, (r.size, 1))
-        dk = np.tile(dk, (r.size, 1))
-        r = np.tile(r, (k.shape[1], 1)).T
-        assert k.shape == P_ell.shape == dk.shape == r.shape  # confirm shape
+        k = np.tile(k, (r_input.size, 1))
+        P_ell = np.tile(P_ell, (r_input.size, 1))
+        dk = np.tile(dk, (r_input.size, 1))
+        r = np.tile(r_input.flatten(), (k.shape[1], 1)).T
+        assert k.shape == P_ell.shape == dk.shape == r.shape
         if r_damp:
             damp = np.exp(-r*np.square(k*a))
         else:
@@ -177,7 +178,7 @@ class PowerTemplate:
         xi_ell = np.power(1j, ell) / (2*np.square(np.pi)) * np.sum(
             np.square(k) * P_ell * spherical_jn(ell, k*r) * damp * dk,
             axis=1)
-        return xi_ell
+        return np.real(xi_ell.reshape(r_input.shape))
 
 
 # %% unit test, do this in jupyter?
@@ -187,13 +188,13 @@ if __name__ == '__main__':
     # --- calculate Psmooth and xi using current code ---
     # read linear camb power spectrum
     r = np.arange(10, 300, 1)
-    n_mu_bins = 100
+    n_mu_bins = 1000
     path_p_lin = '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/emulator_1100box_planck_00-0_products/emulator_1100box_planck_00-0_power/info/camb_matterpower.dat'
     data = np.loadtxt(path_p_lin)
     k = data[:, 0]
     P_lin = data[:, 1]
     power = PowerTemplate(z=0.5)
-    P = power.P(k, P_lin, 1000)
+    P = power.P(k, P_lin, n_mu_bins)
     xi_0 = power.xi_multipole(r, ell=0)
     xi_2 = power.xi_multipole(r, ell=2)
     xi_4 = power.xi_multipole(r, ell=4)

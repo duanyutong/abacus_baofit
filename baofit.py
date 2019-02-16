@@ -1,388 +1,237 @@
 from __future__ import (
         absolute_import, division, print_function, unicode_literals)
+from itertools import product
+from functools import reduce
 import os
 import numpy as np
 from scipy.optimize import minimize
 import sys
 import traceback
+from scipy.special import legendre
+from p2xi import PowerTemplate
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
 # polydeg = '3p'  # 1, 2, 3, 3p
 # rmin = 50  # 20, 30, 40, 50
-
-rmax = 150  # the minimum and maximum scales to be used in the fit
-rbmax = 80  # the maximum scale to be used to set the bias prior
-# Hdir = '/home/dyt/store/AbacusCosmos_1100box_planck/'  # this is the save directory
-Hdir = '/home/dyt/store/emulator_1100box_planck-norsd/'  # this is the save directory
-savefolder = '2Dbaofits_poly{}_{}/'
+# Hdir = '/home/dyt/store/AbacusCosmos_1100box_planck/'
 # ft = 'zheng07' # common prefix of all data files cinlduing last '_'
-zb = ''  # zb = 'zbin3_' # change number to change zbin
-binc = ''  # binc = 0 # change number to change bin center
-bs = 5.0  # the r bin size of the data
-bc = '.txt'  # bc = 'post_recon_bincent'+str(binc)+'.dat'
+# zb = ''  # zb = 'zbin3_' # change number to change zbin
+# binc = ''  # binc = 0 # change number to change bin center
+# bs = 5.0  # the r bin size of the data
+# bc = '.txt'  # bc = 'post_recon_bincent'+str(binc)+'.dat'
 # fout = ft
-chi_min = 20000
+n_mu_bins = 1000
+chisq_min = 1000
+r_avg_increment = 2
+txtfmt = b'%.30e'
 
 
-def findPolya(H, ci, d):
-    ht = H.transpose()
-    onei = np.linalg.pinv(np.dot(np.dot(H, ci), ht))
-    comb = np.dot(np.dot(onei, H), ci)
-    return np.dot(comb, d)
+def matmul(*args):
+    return reduce(np.dot, [*args])
 
 
 class baofit3D:
 
-    def __init__(self, dv, ic, mod, rl, polydeg):
+    def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+                 r_min=50, r_max=150):
+
+        self.k = k
+        self.P_lin = P_lin
         self.polydeg = polydeg
-        self.xim = dv
-        self.rl = rl
-        m2 = 1.
-        self.nbin = len(self.rl)
-
-        self.invt = ic
-        if self.nbin != len(self.invt):
-            return 'vector matrix mismatch!'
-
-        self.ximodmin = 10.
-
-        self.x0 = []  # empty lists to be filled for model templates
-        self.x2 = []
-        self.x4 = []
-
-        # change current working directory to file directory
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-        mf0 = open('BAOtemplates/xi0'+mod).readlines()
-        mf2 = open('BAOtemplates/xi2'+mod).readlines()
-        mf4 = open('BAOtemplates/xi4'+mod).readlines()
-
-        for i in range(0,len(mf0)):
-            ln0 = mf0[i].split()
-            self.x0.append(2.1*(float(ln0[1])))
-            # self.x0sm.append(2.1*float(mf0sm[i].split()[1]))
-            ln2 = mf2[i].split()
-            m2 = 2.1*(float(ln2[1]))
-            self.x2.append(m2)
-            # self.x2sm.append(2.1*float(mf2sm[i].split()[1]))
-            ln4 = mf4[i].split()
-            m4 = 2.1*(float(ln4[1]))
-            self.x4.append(m4)
-            # self.x4sm.append(2.1*float(mf4sm[i].split()[1]))
-        self.at = 1.
-        self.ar = 1.
-        self.b0 = 1.
-        self.b2 = 1.
-        self.b4 = 1.
-        if self.polydeg == '1':
-            self.H = np.zeros((2,self.nbin))
-            for i in range(0,self.nbin):
-                if i < self.nbin/2:
-                    self.H[0][i] = 1./self.rl[i]**2.
-                if i >= self.nbin/2:
-                    self.H[1][i] = 1./self.rl[i]**2.
-        elif self.polydeg == '2':
-            self.H = np.zeros((4,self.nbin))
-            for i in range(0,self.nbin):
-                if i < self.nbin/2:
-                    self.H[0][i] = 1./self.rl[i]
-                    self.H[1][i] = 1./self.rl[i]**2.
-                if i >= self.nbin/2:
-                    self.H[2][i] = 1./self.rl[i]
-                    self.H[3][i] = 1./self.rl[i]**2.
-        elif self.polydeg == '3':
-            self.H = np.zeros((6,self.nbin))
-            for i in range(0,self.nbin):
-                if i < self.nbin/2:
-                    self.H[0][i] = 1.
-                    self.H[1][i] = 1./self.rl[i]
-                    self.H[2][i] = 1./self.rl[i]**2.
-                if i >= self.nbin/2:
-                    self.H[3][i] = 1.
-                    self.H[4][i] = 1./self.rl[i]
-                    self.H[5][i] = 1./self.rl[i]**2.
-        elif self.polydeg == '3p':
-            self.H = np.zeros((4,self.nbin))
-            for i in range(0,self.nbin):
-                if i < self.nbin/2:
-                    self.H[0][i] = 1.
-                    self.H[1][i] = 1./self.rl[i]
-                if i >= self.nbin/2:
-                    self.H[2][i] = 1.
-                    self.H[3][i] = 1./self.rl[i]
-        
-    def wmod(self,r,sp=1.):
-        self.sp = sp
-        sum1 = 0
-        sum2 = 0
-        nmu = 100
-        dmu = 1./float(nmu)
-        for i in range(nmu):
-            mu = i*dmu+dmu/2.
-            al = np.sqrt(mu**2.*self.ar**2.+(1.-mu**2.)*self.at**2.)
-            mup = mu*self.ar/al
-            rp = r*al
-            ximu = self.lininterp(self.x0,rp)+P2(mup)*self.lininterp(self.x2,rp)+P4(mup)*self.lininterp(self.x4,rp)
-            sum1 += ximu
-            sum2 += mu**2.*ximu
-        return dmu*sum1, 1.5*dmu*sum2 
-
-
-    def lininterp(self,f,r):
-        indd = int((r-self.ximodmin)/self.sp)
-        indu = indd + 1
-        fac = (r-self.ximodmin)/self.sp-indd
-        if fac > 1.:
-            print('ERROR: BAD FAC in wmod')
-            return 'ERROR'
-        if indu >= len(f)-1:
-            return 0
-        return f[indu]*fac+(1.-fac)*f[indd] 
-
-    def mkxi(self):
-        self.xia = []
-        for i in range(0, int(len(self.rl)/2)):
-            xi0,xi2 = self.wmod(self.rl[i])
-            self.xia.append(xi0)
-        for i in range(int(len(self.rl)/2),self.nbin):
-            xi0,xi2 = self.wmod(self.rl[i])
-            self.xia.append(xi2)
-        return True 
-        
-    def chi_templ_alphfXX(self, parameter_list ,wo='n',fw='',v='n'):
-
-        BB = parameter_list[0]
-        if BB < 0:
-            return chi_min
-        A0 = parameter_list[1]
-        A1 = parameter_list[2]
-        A2 = parameter_list[3]
-        Beta = parameter_list[4]
-        if Beta < 0:
-            return chi_min
-        A02 = parameter_list[5]
-        A12 = parameter_list[6]
-        A22 = parameter_list[7]
-        modl = []
-        if wo == 'y':
-            fo = open('ximod'+fw+'.dat','w')
-        for i in range(0, int(self.nbin/2)):
-            r = self.rl[i]
-            mod0 = BB*self.xia[i]+A0+A1/r+A2/r**2.
-            modl.append(mod0)
-            if wo == 'y':
-                fo.write(str(self.rl[i])+' '+str(mod0)+'\n')
-        
-        for i in range(int(self.nbin/2),self.nbin):
-            r = self.rl[i]
-            mod2 = 5.*(Beta*self.xia[i]-BB*0.5*self.xia[int(i-self.nbin/2)])+A02+A12/r+A22/r**2.
-            if wo == 'y':
-                fo.write(str(self.rl[i])+' '+str(mod2)+'\n')            
-            modl.append(mod2)
-        if wo == 'y':
-            fo.close()      
-
-        dl = []
-        for i in range(0,self.nbin):
-            dl.append(self.xim[i]-modl[i])
-        chit = np.dot(np.dot(dl,self.invt),dl)
-        if v == 'y':
-            print('dl, chit: ', dl,chit)
-        BBfac = (np.log(BB/self.BB)/self.Bp)**2.
-        Btfac = (np.log(Beta/self.B0)/self.Bt)**2.
-        return chit+BBfac+Btfac
-
-    def chi_templ_alphfXX_an(self, parameter_list, wo='n',fw='',v='n'):
-
-        BB = parameter_list[0]
-        if BB < 0:
-            return chi_min
-        Beta = parameter_list[1]
-        if Beta < 0:
-            return chi_min
-        modl = []
-        # if wo == 'y':
-        #     fo = open(Hdir+self.savefolder+fw+'-ep0-ximod.dat','w')
-        pv = []
-        for i in range(0, int(self.nbin/2)):
-            pv.append(self.xim[i]-BB*self.xia[i])
-        for i in range(int(self.nbin/2), self.nbin):
-            pv.append(self.xim[i]-(5.*(Beta*self.xia[i]-BB*0.5*self.xia[int(i-self.nbin/2)])))
-         
-        Al = findPolya(self.H,self.invt,pv)
-        A0,A1,A2,A02,A12,A22 = 0,0,0,0,0,0
-        if self.polydeg == '1':
-            A2,A22 = Al[0],Al[1]
-        if self.polydeg == '2':
-            A1,A2,A12,A22 = Al[0],Al[1],Al[2],Al[3]
-        if self.polydeg == '3':
-            A0,A1,A2,A02,A12,A22 = Al[0],Al[1],Al[2],Al[3],Al[4],Al[5]
-        if self.polydeg == '3p':
-            A0,A1,A02,A12 = Al[0],Al[1],Al[2],Al[3]
-        for i in range(0, int(self.nbin/2)):
-            r = self.rl[i]
-            mod0 = BB*self.xia[i]+A0+A1/r+A2/r**2.
-            modl.append(mod0)
-            if wo == 'y':
-                mod0sm = BB*self.xiasm[i]+A0+A1/r+A2/r**2.
-                fo.write(str(self.rl[i])+' '+str(mod0)+' '+str(mod0sm)+'\n')
-        
-        for i in range(int(self.nbin/2),self.nbin):
-            r = self.rl[i]
-            mod2 = 5.*(Beta*self.xia[i]-BB*0.5*self.xia[int(i-self.nbin/2)])+A02+A12/r+A22/r**2.
-            if wo == 'y':
-                mod2sm = 5.*(Beta*self.xiasm[i]-BB*0.5*self.xiasm[int(i-self.nbin/2)])+A02+A12/r+A22/r**2.
-                fo.write(str(self.rl[i])+' '+str(mod2)+' '+str(mod2sm)+'\n')            
-            modl.append(mod2)
-        if wo == 'y':
-            fo.close()
-
-        dl = []
-        for i in range(0,self.nbin):
-            dl.append(self.xim[i]-modl[i])  
-        chit = np.dot(np.dot(dl,self.invt),dl)
-        if v == 'y':
-            print('dl, chit: ', dl, chit)
-        BBfac = (np.log(BB/self.BB)/self.Bp)**2.
-        Btfac = (np.log(Beta/self.B0)/self.Bt)**2.
-        return chit + BBfac + Btfac
-
-def Xism_arat_1C_an(dv,icov,rl,mod,dvb,icovb,rlb,
-                    B0=1.,
-                    armin=1.0, armax=1.04, spar=0.0004,
-                    atmin=1.0, atmax=1.04, spat=0.0004, 
-                    nobao='n',Bp=.4,Bt=.4,meth='Nelder-Mead',
-                    fout='', polydeg='3', rmin=50):
-
-    folder = savefolder.format(polydeg, rmin)
-    print('saving to', os.path.join(Hdir + folder))
-    # print('try meth = "Nelder-Mead" if does not work or answer is weird')
-    bb = baofit3D_ellFull_1cov(dvb,icovb,mod,rlb,polydeg) #initialize for bias prior
-    b = baofit3D_ellFull_1cov(dv,icov,mod,rl,polydeg) #initialize for fitting
-    b.B0 = B0
-    b.Bt = Bt
-    
-    bb.Bp = 100.
-    bb.BB = 1.
-    bb.B0 = B0
-    bb.Bt = 100.
-    bb.mkxi()
-    b.bins = bs
-    
-    B = 0.1
-    BB = None
-    chiBmin = chi_min
-    while B < 2.:
-        chiB = bb.chi_templ_alphfXX((B,0,0,0,1.,0,0,0))
-        if chiB < chiBmin:
-            chiBmin = chiB
-            BB = B
-        #     print(chiB)
-        # else:
-        #     print('higher', chiB)
-        B += .01
-    if BB == None:
-        print('ChiB >= ChiBmin for B in [0.1, 2)')
-        raise Exception
-#    print('BB, chiBmin:', BB,chiBmin)
-    b.BB = BB  # best fit B0 from prior
-    b.B0 = BB  # best fit B0 from prior used as B2 prior?
-    b.Bp = Bp
-    b.Bt = Bt
-    if not os.path.exists(os.path.join(Hdir + folder)):
-        try:
-            os.makedirs(os.path.join(Hdir + folder))
-            print('2DBAOfits folder DNE, created: {}.'
-                  .format(os.path.join(Hdir + folder)))
-        except OSError:
-            pass
-    fo = open(Hdir+folder+fout+'-arat-covchi.dat','w+')
-    fg = open(Hdir+folder+fout+'-arat-covchigrid.dat','w+')
-#     chim = 1000
-    nar = int(np.rint((armax-armin)/spar))
-    nat = int(np.rint((atmax-atmin)/spat))
-    grid = np.zeros((nar,nat))
-    fac = ((chi_min-2)-len(dv))/(chi_min-1)
-    chim = chi_min
-    for i in range(nar):      
-        b.ar = armin+spar*i+spar/2.
-#        print('b.ar: ', b.ar)
-        for j in range(nat):
-            b.at = atmin+spat*j+spat/2.
-            b.mkxi()
-            inl = (B,B0)
-            (B, B0) = minimize(b.chi_templ_alphfXX_an, inl, 
-                                method = meth, options = {'disp': False}).x
-            chi = b.chi_templ_alphfXX_an((B,B0), v='n')*fac
-            grid[i][j] = chi
-            fo.write(str(b.ar)+' '+str(b.at)+' '+str(chi)+'\n')
-            fg.write(str(chi)+' ')
-            if chi < chim:
-                # print('alpha_r, alpha_t, chisq: ', b.ar,b.at,chi)
-                chim = chi
-                alrm = b.ar
-                altm = b.at
-        fg.write('\n')
-        
-    fo.close()
-    fg.close()
-    return alrm, altm, chim
-
-
-def baofit(inputs):
-# def baofit():
-    try:
-        path_xi_0, path_xi_2, path_cov, fout_tag, polydeg, rmin = inputs
-        r_bins_centre = np.loadtxt(path_xi_0)[:, 0]
-        d0 = np.loadtxt(path_xi_0)[:, 1]
-        d2 = np.loadtxt(path_xi_2)[:, 1]
-        c = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
-        if len(c) != len(d0)*2: print('MISMATCHED data and cov matrix!')
-        if len(d0) != len(d2): print('0 and 2 components of xi mi smatch')
-        # create data vectors in given range
-        r_mask = (rmin < r_bins_centre) & (r_bins_centre < rmax)
-        rl = np.hstack([r_bins_centre[r_mask], r_bins_centre[r_mask]]) * 1.000396 #factor to correct for pairs should have slightly larger average pair distance than the bin center
-        dv = np.hstack([d0[r_mask], d2[r_mask]])
-        # dv_len = int(dv.size/2) # length of selected data vector for ell = 0 and 2
-        rb_mask = r_mask & (r_bins_centre < rbmax)
-        rlb = np.hstack([r_bins_centre[rb_mask], r_bins_centre[rb_mask]]) * 1.000396
-        dvb = np.hstack([d0[rb_mask], d2[rb_mask]])
-        # dvb_len = int(dvb.size/2)
-        print('{} - length of data vector (0 and 2 components): {}'.format(fout_tag, len(dv)))
-        # create cov matrix for data, must keep the cov between mono and quadrupole
-        ri_mask = np.tile(r_mask, (len(r_mask), 1)).transpose()
+        self.reconstructed = reconstructed
+        # monoquad r vector, with factor to correct for pairs should have
+        # slightly larger average pair distance than the bin center
+        r_mask = (r_min < r) & (r < r_max)
+        self.r = r[r_mask]
+        self.rv = np.hstack([self.r, self.r]) * 1.000396
+        self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
+        self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
+        print('Shape of data vector:', self.dv.shape)
+        ri_mask = np.tile(r_mask, (len(r_mask), 1)).T
         rj_mask = np.tile(r_mask, (len(r_mask), 1))
         quadrant_mask = ri_mask & rj_mask
-        covm_mask = np.tile(quadrant_mask, (2,2))
-        covm = c[covm_mask].reshape(dv.size, dv.size)
+        covm_mask = np.tile(quadrant_mask, (2, 2))
+        self.cov = cov[covm_mask].reshape(self.dv.size, self.dv.size)
+        self.icov = np.linalg.pinv(self.cov)
+        # print('{} - Length of data vector: {}'.format(fout_tag, dv.size))
+        self.n = self.r.size
+        self.H = np.zeros((2*self.n, 6))
+        if self.polydeg == '1':  # set up auxillary matrix H
+            self.H[:self.n,  1] = 1/np.square(self.r)
+            self.H[-self.n:, 4] = self.H[:self.n, 0]
+        elif self.polydeg == '2':
+            self.H[:self.n,  0] = 1/np.square(self.r)
+            self.H[:self.n,  1] = 1/self.r
+            self.H[-self.n:, 3:5] = self.H[:self.n, :2]
+        elif self.polydeg == '3':
+            self.H[:self.n,  0] = 1/np.square(self.r)
+            self.H[:self.n,  1] = 1/self.r
+            self.H[:self.n,  2] = 1
+            self.H[-self.n:, 3:] = self.H[:self.n, :3]
+        elif self.polydeg == '3p':
+            self.H[:self.n,  1] = 1/self.r
+            self.H[:self.n,  2] = 1
+            self.H[-self.n:, 4:] = self.H[:self.n, :2]
+        self.at = 1
+        self.ar = 1
+        self.B0 = 1  # default prior values are for initial bias fitting
+        self.B2 = 1  # default prior values are for initial bias fitting
+        self.B0_ln_width = 100
+        self.B2_ln_width = 100
+        self.A = np.zeros(6)
+        self.make_weighted_xi_temp()
+
+    def xi_r_mu(self, r, mu, ell_max=6):
+        ''' input r, mu are 1D arrays, return 2D xi_r_mu(r, mu) '''
+        power = PowerTemplate(z=0.5, reconstructed=self.reconstructed)
+        power.P(self.k, self.P_lin, n_mu_bins)
+        orders = np.arange(ell_max//2)*2
+        xi = 0
+        for order in orders:
+            xi_ell = power.xi_multipole(r, ell=order)
+            Ln = legendre(order)
+            xi += xi_ell * Ln(mu)
+        return xi
+
+    def make_xi_temp(self, r, component='mu2'):
+        ''' rescaled xi_0, xi_2, xi_mu_2 as a function of 1D r array '''
+        mu_bins = np.linspace(0, 1, num=n_mu_bins+1)
+        mu = (mu_bins[1:] + mu_bins[:-1])/2
+        dmu = np.diff(mu_bins)
+        alpha = np.sqrt(np.square(mu*self.ar)
+                        + (1-np.square(mu)*np.square(self.at)))  # size n_mu
+        rp = np.outer(r, alpha)  # r prime rescaled, 2D dim (n_r, n_mu)
+        mup = mu*self.ar/alpha  # mu prime
+        if component in ['0', '2']:
+            ell = np.int(component)
+            Ln = legendre(ell)
+            xi = (2*ell+1)/2*np.sum(
+                    self.xi_r_mu(rp, mup)*(Ln(-mup)+Ln(mup))*dmu, axis=1)
+        elif component == 'mu2':
+            xi = np.sum(3/2*np.square(mup)*self.xi_r_mu(rp, mup)*dmu, axis=1)
+        assert self.r.size == xi.size
+        return xi
+
+    def make_weighted_xi_temp(self):
+        ''' xi_0, xi_2, xi_mu_2 over r bin, weighted by r^2 integral '''
+        n = np.int(np.floor(np.mean(np.diff(self.r))/r_avg_increment)//2*2+1)
+        for component in ['0', '2', 'mu2']:
+            print('Making weighted xi template for {}'
+                  .format(component, n))
+            array = np.zeros((self.r.size, 2, n))
+            for i in range(n):
+                r = self.r - (n-1)/2*r_avg_increment + i*r_avg_increment
+                # print('r bin {} of {}, r = {}'.format(i, n, r))
+                array[:, 0, i] = r
+                array[:, 1, i] = self.make_xi_temp(r, component=component)
+            if not hasattr(self, 'xitemp'):
+                self.xitemp = {}
+            self.xitemp[component] = np.sum(
+                np.square(array[:, 0, :])*array[:, 1, :],
+                axis=1) / np.sum(np.square(array[:, 0, :]), axis=1)
+
+    def make_model_vector(self, B0, B2):
+        ''' calculate model vector from templates using B, A coefficients '''
+        ximod_0 = B0*self.xitemp['0'] \
+            + self.A[0]/np.square(self.r) + self.A[1]/self.r + self.A[2]
+        ximod_2 = 5*(B2*self.xitemp['mu2']-B0/2*self.xitemp['0']) \
+            + self.A[3]/np.square(self.r) + self.A[4]/self.r + self.A[5]
+        self.mv = np.hstack([ximod_0, ximod_2])  # model vector
+
+    def calculate_chisq(self, B0, B2):
+        ''' input Bs is a tuple of two B coefficients '''
+        if B0 < 0 or B2 < 0:
+            return chisq_min
+        dxi = self.dv - self.mv  # delta xi vector between data and model
+        chisq = matmul(dxi, self.icov, dxi)
+        B0_term = np.square(np.log(B0/self.B0)/self.B0_ln_width)
+        B2_term = np.square(np.log(B2/self.B2)/self.B2_ln_width)
+        return chisq + B0_term + B2_term
+
+    def B0_B2_optimize(self, Bs):
+
+        B0, B2 = Bs
+        self.A = np.zeros(6)  # assume zero A before taking diff solving for A
+        self.make_model_vector(B0=B0, B2=B2)  # get model vector with 0 A
+        self.A = matmul(
+                np.linalg.pinv(matmul(self.H.T, self.icov, self.H)),
+                self.H.T, self.icov, self.dv-self.mv)  # solve for A hat
+        self.make_model_vector(B0=B0, B2=B2)  # now make new mv with A hat
+        return self.calculate_chisq(B0, B2)
+
+    def do_fit(self, armin=0.910, armax=1.040, arsp=0.005,
+               atmin=0.990, atmax=1.040, atsp=0.005):
+
+        ars = np.arange(armin, armax, arsp)
+        ats = np.arange(atmin, atmax, atsp)
+        chisq_grid = np.zeros((ars.size, ats.size))
+        chisq_list = []
+        for i, j in product(range(ars.size), range(ats.size)):
+            self.ar = ars[i]
+            self.at = ats[j]
+            self.make_weighted_xi_temp()
+            B0, B2 = minimize(self.B0_B2_optimize, (1, 1),
+                              bounds=((0.1, 2), (0.1, 2)), method='SLSQP').x
+            chisq_min = self.B0_B2_optimize((B0, B2))
+            chisq_grid[i, j] = chisq_min
+            chisq_list.append([ars[i], ats[j], chisq_min])
+        return chisq_grid, np.array(chisq_list)
+
+
+def baofit(argv):
+    try:
+        # save_dir = '/home/dyt/store/emulator_1100box_planck-norsd/'
+        path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
+            path_chisq_grid, path_chisq_table, recon = argv
+        data = np.loadtxt(path_p_lin)
+        k = data[:, 0]
+        P_lin = data[:, 1]
+        data = np.loadtxt(path_xi_0)
+        r = data[:, 0]
+        xi_0 = data[:, 1]
+        xi_2 = np.loadtxt(path_xi_2)[:, 1]
+        cov = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
+        reconstructed = True if recon == '1' else False
         try:
-            assert not np.any(covm == np.nan)
+            assert (r.size == xi_0.size == xi_2.size
+                    == cov.shape[0]/2 == cov.shape[1]/2)
+            assert not np.any(cov == np.nan)
         except AssertionError:
-            print('NaN values at: ', np.where(covm == np.nan))
-            raise
-        invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
-        # covm for bias
-        rbi_mask = np.tile(rb_mask, (len(rb_mask), 1)).transpose()
-        rbj_mask = np.tile(rb_mask, (len(rb_mask), 1))
-        quadrant_mask = rbi_mask & rbj_mask
-        covmb_mask = np.tile(quadrant_mask, (2,2))
-        covmb = c[covmb_mask].reshape(dvb.size, dvb.size)
-        invc = np.linalg.pinv(covm) #the inverse covariance matrix to pass to the code
-        invcb = np.linalg.pinv(covmb)
-        # define template
-        mod = 'Challenge_matterpower0.44.02.54.015.01.0.dat'  #BAO template used
-        alrm, altm, chim = Xism_arat_1C_an(
-            dv, invc, rl, mod, dvb, invcb, rlb, fout=fout_tag, polydeg=polydeg, rmin=rmin,
-            armin=0.975, armax=1.035, spar=0.0004,  # armin=0.910, armax=1.010, spar=0.0015,
-            atmin=1.000, atmax=1.040, spat=0.0004)  # atmin=0.990, atmax=1.040, spat=0.0015)
-        print('{} - alpha_r, alpha_t, chisq at minimum: {}, {}, {}'.format(fout_tag, alrm, altm, chim))
-        return alrm, altm
+            print('Assertion error, shapes', r.shape, xi_0.shape, xi_2.shape,
+                  cov.shape[0]/2, cov.shape[1]/2)
+            print('NaN values in cov at: ', np.where(cov == np.nan))
+            raise Exception
+        # find best B_0 from bias prior, reduced range
+        print('Initializing bias prior instance')
+        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+                        r_min=rmin, r_max=80)
+        B0 = np.arange(0.1, 2, 0.01)
+        chisq = np.zeros(B0.shape)
+        for i in range(B0.size):
+            fit1.make_model_vector(B0[i], 1)  # A and widths set with init
+            chisq[i] = fit1.calculate_chisq(B0[i], 1)
+        assert np.any(chisq < chisq_min) is np.True_
+        print('Best fit B0 prior: {}'.format(B0[np.argmin(chisq)]))
+        # update prior and do chisq grid scan, full range
+        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+                        r_min=rmin, r_max=150)
+        fit2.B0 = B0[np.argmin(chisq)]  # new B0 prior for fit2
+        fit2.B2 = fit2.B0  # same prior for B2
+        fit2.B0_ln_width = 0.4
+        fit2.B2_ln_width = 0.4
+        chisq_grid, chisq_table = fit2.do_fit(
+            armin=0.975, armax=1.035, arsp=0.0004,
+            atmin=1.000, atmax=1.040, atsp=0.0004)
+        if not os.path.exists(os.path.dirname(path_chisq_grid)):
+            os.mkdir(os.path.dirname(path_chisq_grid))
+        np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
+        np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
     except Exception as E:
-        print('Exception caught in worker thread {}'.format(fout_tag))
+        print('Exception caught in worker thread {}'.format(path_xi_0))
         traceback.print_exc()
         raise E
 
+
 if __name__ == '__main__':
 
-        baofit(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5, sys.argv[6]])
-    
+    baofit(sys.argv[1:])

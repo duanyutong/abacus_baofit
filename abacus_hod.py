@@ -24,7 +24,7 @@ import numpy as np
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
-import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+from Abacus import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
 import matplotlib.pyplot as plt
 # plt.switch_backend('Agg')  # switch this on if backend error is reported
 
