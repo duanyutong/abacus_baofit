@@ -1040,6 +1040,7 @@ def combine_galaxy_table_metadata(phases):
 def run_baofit_parallel(baofit_phases):
 
     from baofit import baofit
+    from baofit_lwv import baofit as baofit_lwv
     polydeg = '3'
     rmin = 50
     indir = os.path.join(save_dir,
@@ -1048,6 +1049,7 @@ def run_baofit_parallel(baofit_phases):
     outdir = os.path.join(save_dir,
                           '2Dbaofits_poly{}_rmin_{}'.format(polydeg, rmin))
     list_of_inputs = []
+    list_lwv = []
     for model_name in model_names:
         # for i in [0]:  # cebug
         for i in range(2):
@@ -1067,13 +1069,13 @@ def run_baofit_parallel(baofit_phases):
                     '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
                     .format(model_name, xi_type, phase))
                 if 'pre-recon' in xi_type:
-                    recon = '0'
+                    recon = False
                     path_cov = os.path.join(
                         indir,
                         '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
                         .format(model_name))
                 elif 'post-recon' in xi_type:
-                    recon = '1'
+                    recon = True
                     path_cov = os.path.join(
                         indir,
                         '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
@@ -1084,9 +1086,13 @@ def run_baofit_parallel(baofit_phases):
                 list_of_inputs.append(
                     [redshift, path_p_lin, path_xi_0, path_xi_2, path_cov,
                      '3', rmin, path_cg, path_ct, recon])
+                list_lwv.append([path_xi_0, path_xi_2, path_cov, fout_tag,
+                                 '3', rmin])
+#     baofit(list_of_inputs[0])
+#    baofit_lwv(list_lwv[0])
     with closing(MyPool(processes=16,
                         maxtasksperchild=1)) as p:
-        p.map(baofit, list_of_inputs)
+        p.map(baofit_lwv, list_lwv)
     p.close()
     p.join()
 

@@ -19,7 +19,7 @@ from scipy.special import spherical_jn
 def W(kR):
     '''
     spherical top hat window function in Fourier space
-    MBW Eqn 6.32, input y = x/r = kr, dimensionless
+    MBW Eqn 6.32, input argument y = x/r = kr, dimensionless
     '''
     return 3 * (np.sin(kR)-(kR*np.cos(kR))) / np.power(kR, 3)
 
@@ -32,13 +32,13 @@ class PowerTemplate:
         self.z = z
         self.h = h
         self.reconstructed = reconstructed
-        self.ombhsq = ombhsq
-        self.omhsq = omhsq
+        self.ombhsq = ombhsq  # Omega matter baryon
+        self.omhsq = omhsq  # Omega matter (baryon + CDM)
         self.om = omhsq/np.square(h)
         self.omb = ombhsq/np.square(h)
         self.cosmology = FlatLambdaCDM(H0=100*h, Om0=self.om, Tcmb0=Tcmb0,
                                        Ob0=self.omb)
-        self.ol = 1 - self.omhsq/np.square(self.h)  # ignring radiation density
+        self.ol = 1 - self.omhsq/np.square(h)  # ignring radiation density
         self.sigma8 = sigma8
         self.ns = ns
         self.Tcmb0 = 2.725
@@ -99,19 +99,19 @@ class PowerTemplate:
         ol = self.ol
         omz = self.cosmology.Om(self.z)  # Omega matter at z
         olz = ol/np.square(self.cosmology.efunc(self.z))  # MBW Eqn 3.77
-        # MBW Eqn 4.76
-        g0 = 5/2*om/(np.power(om, 4/7) - ol + ((1+om/2)*(1+ol/70)))
+        g0 = 5/2*om/(np.power(om, 4/7) - ol + ((1+om/2)*(1+ol/70)))  # Eqn 4.76
         gz = 5/2*omz/(np.power(omz, 4/7) - olz + ((1+omz/2)*(1+olz/70)))
         Dlin_ratio = gz / g0 / (1+self.z)
         Psmooth = self.P0smooth * np.square(self.T0(k)) * \
             np.power(k, self.ns) * np.square(Dlin_ratio)
         return Psmooth
 
-    def P(self, k_lin, P_lin, n_mu_bins):
+    def P(self, k_lin, P_lin, n_mu_bins, beta=0.4, Sigma_s=4):
         """
         This is the final power template from P_lin and P_nw
         including the C and exponential damping terms
         input k, P are 1D arrays from CAMB, n_mu_bins is an integer
+        defauolt beta = 0.4, dimensionless
         """
         self.k = k_lin  # 1D array
         self.P_lin = P_lin  # 1D array
@@ -121,14 +121,11 @@ class PowerTemplate:
         mu, k = np.meshgrid(self.mu, k_lin)  # 2D meshgrid
         P_lin = np.tile(P_lin, (n_mu_bins, 1)).T  # meshgrid
         P_nw = self.Psmooth(k)  # follows meshgrid shape of k_lin
-
         try:
             assert P_lin.size == P_nw.size
         except AssertionError:
             print("P shapes are", P_lin.shape, P_nw.shape)
-        beta = 0.4  # dimensionless
         Sigma_r = 15  # Mpc/h
-        Sigma_s = 4  # Mpc/h
         if self.reconstructed:
             Sigma_perp = 2.5  # Mpc/h
             Sigma_para = 4  # Mpc/h
@@ -147,7 +144,7 @@ class PowerTemplate:
     def p_multipole(self, ell):
 
         Ln = legendre(ell)
-        P_ell = (2*ell + 1)/2 * np.sum(
+        P_ell = (2*ell + 1) / 2 * np.sum(
             self.P_k_mu * (Ln(-self.mu) + Ln(self.mu)) * np.diff(self.mu_bins),
             axis=1)
         return P_ell

@@ -22,6 +22,7 @@ from p2xi import PowerTemplate
 # fout = ft
 n_mu_bins = 1000
 chisq_min = 1000
+xi_temp_rescale = 2.9
 r_avg_increment = 2
 txtfmt = b'%.30e'
 
@@ -89,7 +90,7 @@ class baofit3D:
             xi_ell = self.xi_multipole(r, ell=order)
             Ln = legendre(order)
             xi += xi_ell * Ln(mu)
-        return xi
+        return xi*xi_temp_rescale
 
     def xi_temp_components(self, r, component='mu2'):
         ''' rescaled xi_0, xi_2, xi_mu_2 as a function of 1D r array '''
@@ -97,13 +98,14 @@ class baofit3D:
         mu = (mu_bins[1:] + mu_bins[:-1])/2
         dmu = np.diff(mu_bins)
         alpha = np.sqrt(np.square(mu*self.ar)
-                        + (1-np.square(mu)*np.square(self.at)))  # size n_mu
+                        + (1-np.square(mu))*np.square(self.at))  # size n_mu
         rp = np.outer(r, alpha)  # r prime rescaled, 2D dim (n_r, n_mu)
-        mup = mu*self.ar/alpha  # mu prime
-        if component == '0':  # can add any even order, '2', '4'
+        mup = mu*self.ar/alpha  # mu prime, size n_mu
+        # mup = np.tile(mup, (self.n, 1))
+        if component in ['0', '2']:  # can add any even order, '2', '4'
             ell = np.int(component)
             Ln = legendre(ell)
-            xi = (2*ell+1)/2*np.sum(
+            xi = (2*ell + 1) / 2 * np.sum(
                     self.xi_r_mu(rp, mup)*(Ln(-mup)+Ln(mup))*dmu, axis=1)
         elif component == 'mu2':
             xi = np.sum(3/2*np.square(mup)*self.xi_r_mu(rp, mup)*dmu, axis=1)
@@ -115,7 +117,7 @@ class baofit3D:
         if not hasattr(self, 'xitemp'):
             self.xitemp = {}
         n = np.int(np.floor(np.mean(np.diff(self.r))/r_avg_increment)//2*2+1)
-        for comp in ['0', 'mu2']:
+        for comp in ['0', '2', 'mu2']:
             if weighted:
                 # print('Making weighted xi {} tempplate across bin width...'
                 #       .format(comp))
@@ -135,11 +137,12 @@ class baofit3D:
 
     def make_model_vector(self, B0, B2):
         ''' calculate model vector from templates using B, A coefficients '''
-        ximod_0 = B0*self.xitemp['0'] \
-            + self.A[0]/np.square(self.r) + self.A[1]/self.r + self.A[2]
-        ximod_2 = 5*(B2*self.xitemp['mu2']-B0/2*self.xitemp['0']) \
-            + self.A[3]/np.square(self.r) + self.A[4]/self.r + self.A[5]
-        self.mv = np.hstack([ximod_0, ximod_2])  # model vector
+        self.ximod = {
+            '0': B0*self.xitemp['0']
+            + self.A[0]/np.square(self.r) + self.A[1]/self.r + self.A[2],
+            '2': 5*(B2*self.xitemp['mu2']-B0/2*self.xitemp['0'])
+            + self.A[3]/np.square(self.r) + self.A[4]/self.r + self.A[5]}
+        self.mv = np.hstack([self.ximod['0'], self.ximod['2']])  # model vector
 
     def calculate_chisq(self, B0, B2):
         ''' input Bs is a tuple of two B coefficients '''
@@ -149,7 +152,9 @@ class baofit3D:
         chisq = matmul(dxi, self.icov, dxi)
         B0_term = np.square(np.log(B0/self.B0)/self.B0_ln_width)
         B2_term = np.square(np.log(B2/self.B2)/self.B2_ln_width)
-        return chisq + B0_term + B2_term
+        # print('chisq components', chisq, B0_term, B2_term)
+        factor = (chisq_min-2*self.n) / (chisq_min-1)
+        return factor * (chisq + B0_term + B2_term)
 
     def B0_B2_optimize(self, Bs):
 
@@ -181,8 +186,9 @@ class baofit3D:
             chisq_min = self.B0_B2_optimize((B0, B2))
             chisq_grid[i, j] = chisq_min
             chisq_list.append([ars[i], ats[j], chisq_min])
-            print('Grid size: {}, results: ({}, {}, {})'
-                  .format(chisq_grid.shape, ars[i], ats[j], chisq_min))
+            print('Grid {}/{}, ({}, {}), {}'.format(
+                  i*ats.size+j+1, chisq_grid.size, ars[i], ats[j], chisq_min))
+            # print('B0, B2, A:', B0, B2, self.A)
         return chisq_grid, np.array(chisq_list)
 
 
@@ -199,7 +205,7 @@ def baofit(argv):
         xi_0 = data[:, 1]
         xi_2 = np.loadtxt(path_xi_2)[:, 1]
         cov = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
-        reconstructed = True if recon == '1' else False
+        assert type(recon) is bool
         try:
             assert (r.size == xi_0.size == xi_2.size
                     == cov.shape[0]/2 == cov.shape[1]/2)
@@ -211,30 +217,31 @@ def baofit(argv):
             raise Exception
         # find best B_0 from bias prior, reduced range
         print('Initializing bias prior instance')
-        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
                         z=z, r_min=rmin, r_max=80, xi_temp_weighted=False)
         fit1.make_xi_temp()
-        B0 = np.arange(0.1, 2, 0.01)
+        B0 = np.arange(0.1, 2, 0.01)  # template & data scale differ by 2 to 3
         chisq = np.zeros(B0.shape)
         for i in range(B0.size):
             fit1.make_model_vector(B0[i], 1)  # A and widths set with init
             chisq[i] = fit1.calculate_chisq(B0[i], 1)
         assert np.any(chisq < chisq_min) is np.True_
-        print('Best fit B0 prior: {}'.format(B0[np.argmin(chisq)]))
+        print('Best fit prior B0 {}, chisq_min {}'
+              .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
-        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
                         z=z, r_min=rmin, r_max=150, xi_temp_weighted=False)
         fit2.B0 = B0[np.argmin(chisq)]  # new B0 prior for fit2
         fit2.B2 = fit2.B0  # same prior for B2
         fit2.B0_ln_width = 0.4
         fit2.B2_ln_width = 0.4
         chisq_grid, chisq_table = fit2.do_fit(
-            armin=0.970, armax=1.040, arsp=0.002,
-            atmin=1.000, atmax=1.040, atsp=0.002)
+            atmin=0.996, atmax=1.014, atsp=0.0008,
+            armin=0.986, armax=1.030, arsp=0.0008)
         if not os.path.exists(os.path.dirname(path_chisq_grid)):
             os.mkdir(os.path.dirname(path_chisq_grid))
         np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
-        np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
+        np.savetxt(path_chisq_table, chisq_table, fmt=txtfmt)
     except Exception as E:
         print('Exception caught in worker thread {}'.format(path_xi_0))
         traceback.print_exc()
