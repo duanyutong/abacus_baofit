@@ -39,7 +39,7 @@ from Abacus import Halotools as abacus_ht  # Abacus
 # phases = range(20)
 # prod_dir = '/mnt/gosling1/bigsim_products/AbacusCosmos_1100box_planck_products/'
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'matter'  # 'z0.5'
+tagout = 'norsd'  # 'matter'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 prod_dir = '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
 
@@ -53,14 +53,14 @@ model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_s1',    'gen_s1_n',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n']
-model_names = ['matter']
-reals = range(1)  # range(12)
+model_names = ['gen_base1']
+reals = range(12)  # range(12)
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
 N_threads = 16  # number of threads for a single realisation
 N_sub = 3  # number of subvolumes per dimension
 random_multiplier = 10
-use_matter_field = True
+use_matter_field = False
 matter_subsample_fraction = 0.01
 galaxy_bias = 2.23
 
@@ -1132,7 +1132,7 @@ def run_baofit_parallel(baofit_phases):
                      '3', rmin, path_cg, path_ct, recon])
                 # list_lwv.append([path_xi_0, path_xi_2, path_cov, fout_tag,
                 #                  '3', rmin])
-    with closing(MyPool(processes=16,
+    with closing(MyPool(processes=len(phases),
                         maxtasksperchild=1)) as p:
         p.map(baofit, list_of_inputs)
     p.close()
@@ -1157,7 +1157,7 @@ if __name__ == "__main__":
                                 maxtasksperchild=1)) as p:
                 p.map(partial(do_galaxy_table,
                               phase=phase, model_name=model_name,
-                              overwrite=True),
+                              overwrite=False),
                       reals)
                 p.close()
                 p.join()

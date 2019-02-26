@@ -661,10 +661,10 @@ def populate_model(halocat, model, gt_path=''):
                                size=int(len(pt)*matter_subsample_fraction),
                                replace=False)
         # random choose a subset of the 10% subsample
-        table = pt[idx]
+        tb = pt[idx]
         for pos in ['x', 'y', 'z']:
-            table[pos] = table[pos].astype(np.float32)
-        model.mock.particle_table = table
+            tb[pos] = tb[pos].astype(np.float32)
+        model.mock.particle_table = tb
         model.mock.ND = len(model.mock.particle_table)
     elif model.model_type == 'prebuilt':
 
@@ -703,11 +703,11 @@ def populate_model(halocat, model, gt_path=''):
         elif os.path.exists(gt_path):
             print('r = {:2d}, loading existing galaxy table: {}'
                   .format(model.r, gt_path))
-            model.mock.galaxy_table = gt = table.Table.read(
+            model.mock.galaxy_table = tb = table.Table.read(
                 gt_path, format='ascii.fast_csv',
                 fast_reader={'parallel': True, 'use_fast_converter': False})
             for pos in ['x', 'y', 'z', 'zreal']:
-                gt[pos] = gt[pos].astype(np.float32)
+                tb[pos] = tb[pos].astype(np.float32)
             model.mock.gt_loaded = True
         model.mock.ND = len(model.mock.galaxy_table)
         print('Mock catalogue populated with {} galaxies'
