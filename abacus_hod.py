@@ -28,6 +28,8 @@ from Abacus import Halotools as abacus_ht  # Abacus' "Halotools" for importing A
 import matplotlib.pyplot as plt
 # plt.switch_backend('Agg')  # switch this on if backend error is reported
 
+matter_subsample_fraction = 0.01
+
 
 # %% MP Class
 class NoDaemonProcess(multiprocessing.Process):
@@ -446,8 +448,8 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     # print('Initialising HOD model: {}...'.format(model_name))
 
     # halotools prebiult models
-    model_type = 'prebuilt'
-    if model_name == 'zheng07':
+    if model_name == 'matter':
+        model_type = 'matter'
         model = PrebuiltHodModelFactory('zheng07',
                                         redshift=redshift,
                                         threshold=-18,
@@ -457,88 +459,99 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
         model.param_dict['alpha'] = 1
         model.param_dict['logM0'] = 13.3
         model.param_dict['logM1'] = 13.8
+    elif model_name in PrebuiltHodModelFactory.prebuilt_model_nickname_list:
+        model_type = 'prebuilt'
+        if model_name == 'zheng07':
+            model = PrebuiltHodModelFactory('zheng07',
+                                            redshift=redshift,
+                                            threshold=-18,
+                                            prim_haloprop_key=halo_m_prop)
+            model.param_dict['logMmin'] = 13.3
+            model.param_dict['sigma_logM'] = 0.8
+            model.param_dict['alpha'] = 1
+            model.param_dict['logM0'] = 13.3
+            model.param_dict['logM1'] = 13.8
 
-    elif model_name == 'cacciato09':
-        model = PrebuiltHodModelFactory('cacciato09',
-                                        redshift=redshift,
-                                        threshold=10,
-                                        prim_haloprop_key=halo_m_prop)
+        elif model_name == 'cacciato09':
+            model = PrebuiltHodModelFactory('cacciato09',
+                                            redshift=redshift,
+                                            threshold=10,
+                                            prim_haloprop_key=halo_m_prop)
 
-        model.param_dict['log_L_0'] = 9.935
-        model.param_dict['log_M_1'] = 12.9  # 11.07
-        model.param_dict['gamma_1'] = 0.3  # 3.273
-        model.param_dict['gamma_2'] = 0.255
-        model.param_dict['sigma'] = 0.143
-        model.param_dict['a_1'] = 0.501
-        model.param_dict['a_2'] = 2.106
-        model.param_dict['log_M_2'] = 14.28
-        model.param_dict['b_0'] = -0.5  # -0.766
-        model.param_dict['b_1'] = 1.008
-        model.param_dict['b_2'] = -0.094
-        model.param_dict['delta_1'] = 0
-        model.param_dict['delta_2'] = 0
+            model.param_dict['log_L_0'] = 9.935
+            model.param_dict['log_M_1'] = 12.9  # 11.07
+            model.param_dict['gamma_1'] = 0.3  # 3.273
+            model.param_dict['gamma_2'] = 0.255
+            model.param_dict['sigma'] = 0.143
+            model.param_dict['a_1'] = 0.501
+            model.param_dict['a_2'] = 2.106
+            model.param_dict['log_M_2'] = 14.28
+            model.param_dict['b_0'] = -0.5  # -0.766
+            model.param_dict['b_1'] = 1.008
+            model.param_dict['b_2'] = -0.094
+            model.param_dict['delta_1'] = 0
+            model.param_dict['delta_2'] = 0
 
-    elif model_name == 'leauthaud11':
-        model = PrebuiltHodModelFactory('leauthaud11',
-                                        redshift=redshift,
-                                        threshold=11,
-                                        prim_haloprop_key=halo_m_prop)
-        model.param_dict['smhm_m0_0'] = 11.5  # 10.72
-        model.param_dict['smhm_m0_a'] = 0.59
-        model.param_dict['smhm_m1_0'] = 13.4  # 12.35
-        model.param_dict['smhm_m1_a'] = 0.3
-        model.param_dict['smhm_beta_0'] = 2  # 0.43
-        model.param_dict['smhm_beta_a'] = 0.18
-        model.param_dict['smhm_delta_0'] = 0.1  # 0.56
-        model.param_dict['smhm_delta_a'] = 0.18
-        model.param_dict['smhm_gamma_0'] = 1  # 1.54
-        model.param_dict['smhm_gamma_a'] = 2.52
-        model.param_dict['scatter_model_param1'] = 0.2
-        model.param_dict['alphasat'] = 1
-        model.param_dict['betasat'] = 1.1  # 0.859
-        model.param_dict['bsat'] = 11  # 10.62
-        model.param_dict['betacut'] = 6  # -0.13
-        model.param_dict['bcut'] = 0.01  # 1.47
+        elif model_name == 'leauthaud11':
+            model = PrebuiltHodModelFactory('leauthaud11',
+                                            redshift=redshift,
+                                            threshold=11,
+                                            prim_haloprop_key=halo_m_prop)
+            model.param_dict['smhm_m0_0'] = 11.5  # 10.72
+            model.param_dict['smhm_m0_a'] = 0.59
+            model.param_dict['smhm_m1_0'] = 13.4  # 12.35
+            model.param_dict['smhm_m1_a'] = 0.3
+            model.param_dict['smhm_beta_0'] = 2  # 0.43
+            model.param_dict['smhm_beta_a'] = 0.18
+            model.param_dict['smhm_delta_0'] = 0.1  # 0.56
+            model.param_dict['smhm_delta_a'] = 0.18
+            model.param_dict['smhm_gamma_0'] = 1  # 1.54
+            model.param_dict['smhm_gamma_a'] = 2.52
+            model.param_dict['scatter_model_param1'] = 0.2
+            model.param_dict['alphasat'] = 1
+            model.param_dict['betasat'] = 1.1  # 0.859
+            model.param_dict['bsat'] = 11  # 10.62
+            model.param_dict['betacut'] = 6  # -0.13
+            model.param_dict['bcut'] = 0.01  # 1.47
 
-    elif model_name == 'tinker13':
-        model = PrebuiltHodModelFactory(
-                    'tinker13',
-                    redshift=redshift,
-                    threshold=11,
-                    prim_haloprop_key=halo_m_prop,
-                    quiescent_fraction_abscissa=[1e12, 1e13, 1e14, 1e15],
-                    quiescent_fraction_ordinates=[0.25, 0.5, 0.75, 0.9])
+        elif model_name == 'tinker13':
+            model = PrebuiltHodModelFactory(
+                        'tinker13',
+                        redshift=redshift,
+                        threshold=11,
+                        prim_haloprop_key=halo_m_prop,
+                        quiescent_fraction_abscissa=[1e12, 1e13, 1e14, 1e15],
+                        quiescent_fraction_ordinates=[0.25, 0.5, 0.75, 0.9])
 
-        model.param_dict['smhm_m0_0_active'] = 11
-        model.param_dict['smhm_m0_0_quiescent'] = 10.8
-        model.param_dict['smhm_m1_0_active'] = 12.2
-        model.param_dict['smhm_m1_0_quiescent'] = 11.8
-        model.param_dict['smhm_beta_0_active'] = 0.44
-        model.param_dict['smhm_beta_0_quiescent'] = 0.32
-        # model.param_dict['alphasat_active'] = 1
-        # model.param_dict['alphasat_quiescent'] = 1
-        # model.param_dict['betacut_active'] = 0.77
-        # model.param_dict['betacut_quiescent'] = -0.12
-        # model.param_dict['bcut_active'] = 0.2
-        # model.param_dict['bcut_quiescent'] = 0.2
-        # model.param_dict['betasat_active'] = 1.5
-        # model.param_dict['betasat_quiescent'] = 0.62
-        model.param_dict['bsat_active'] = 13
-        model.param_dict['bsat_quiescent'] = 8
+            model.param_dict['smhm_m0_0_active'] = 11
+            model.param_dict['smhm_m0_0_quiescent'] = 10.8
+            model.param_dict['smhm_m1_0_active'] = 12.2
+            model.param_dict['smhm_m1_0_quiescent'] = 11.8
+            model.param_dict['smhm_beta_0_active'] = 0.44
+            model.param_dict['smhm_beta_0_quiescent'] = 0.32
+            # model.param_dict['alphasat_active'] = 1
+            # model.param_dict['alphasat_quiescent'] = 1
+            # model.param_dict['betacut_active'] = 0.77
+            # model.param_dict['betacut_quiescent'] = -0.12
+            # model.param_dict['bcut_active'] = 0.2
+            # model.param_dict['bcut_quiescent'] = 0.2
+            # model.param_dict['betasat_active'] = 1.5
+            # model.param_dict['betasat_quiescent'] = 0.62
+            model.param_dict['bsat_active'] = 13
+            model.param_dict['bsat_quiescent'] = 8
 
-    elif model_name == 'hearin15':
-        model = PrebuiltHodModelFactory('hearin15',
-                                        redshift=redshift,
-                                        threshold=11)
-    elif model_name == 'zu_mandelbaum15':
-        model = PrebuiltHodModelFactory('zheng07',
-                                        redshift=redshift,
-                                        threshold=-1)
-    elif model_name == 'zu_mandelbaum16':
-        model = PrebuiltHodModelFactory('zheng07',
-                                        redshift=redshift,
-                                        threshold=-1)
-
+        elif model_name == 'hearin15':
+            model = PrebuiltHodModelFactory('hearin15',
+                                            redshift=redshift,
+                                            threshold=11)
+        elif model_name == 'zu_mandelbaum15':
+            model = PrebuiltHodModelFactory('zheng07',
+                                            redshift=redshift,
+                                            threshold=-1)
+        elif model_name == 'zu_mandelbaum16':
+            model = PrebuiltHodModelFactory('zheng07',
+                                            redshift=redshift,
+                                            threshold=-1)
     # generalised HOD models with 5-parameter zheng07 as base model
     else:  # 'gen_base1'
         model_type = 'general'
@@ -640,7 +653,20 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
 def populate_model(halocat, model, gt_path=''):
 
     # use halotools HOD
-    if model.model_type == 'prebuilt':
+    if model.model_type == 'matter':
+        print('Matter field')
+        model.populate_mock(halocat, Num_ptcl_requirement=10000)
+        pt = halocat.halo_ptcl_table
+        idx = np.random.choice(np.arange(len(pt)),
+                               size=int(len(pt)*matter_subsample_fraction),
+                               replace=False)
+        # random choose a subset of the 10% subsample
+        table = pt[idx]
+        for pos in ['x', 'y', 'z']:
+            table[pos] = table[pos].astype(np.float32)
+        model.mock.particle_table = table
+        model.mock.ND = len(model.mock.particle_table)
+    elif model.model_type == 'prebuilt':
 
         print('Populating {} halos with N_cut = {} for r = {:2d}'
               'using prebuilt model {} ...'
@@ -652,6 +678,7 @@ def populate_model(halocat, model, gt_path=''):
         else:  # model was never populated and mock attribute does not exist
             model.populate_mock(halocat, Num_ptcl_requirement=model.N_cut)
         model.mock.gt_loaded = False
+        model.mock.ND = len(model.mock.galaxy_table)
     # use particle-based HOD
     elif model.model_type == 'general':
         if hasattr(model, 'mock'):
@@ -682,10 +709,10 @@ def populate_model(halocat, model, gt_path=''):
             for pos in ['x', 'y', 'z', 'zreal']:
                 gt[pos] = gt[pos].astype(np.float32)
             model.mock.gt_loaded = True
+        model.mock.ND = len(model.mock.galaxy_table)
+        print('Mock catalogue populated with {} galaxies'
+              .format(len(model.mock.galaxy_table)))
     model.mock.reconstructed = False
-    model.mock.ND = len(model.mock.galaxy_table)
-    print('Mock catalogue populated with {} galaxies'
-          .format(len(model.mock.galaxy_table)))
     return model
 
 

@@ -8,7 +8,9 @@ from scipy.optimize import minimize
 import sys
 import traceback
 from scipy.special import legendre
+from scipy.interpolate import InterpolatedUnivariateSpline
 from p2xi import PowerTemplate
+from tqdm import tqdm
 
 # setup to run the data in the Ross_2016_COMBINEDDR12 folder
 # polydeg = '3p'  # 1, 2, 3, 3p
@@ -23,7 +25,7 @@ from p2xi import PowerTemplate
 n_mu_bins = 1000
 chisq_min = 1000
 xi_temp_rescale = 2.9
-r_avg_increment = 2
+r_avg_increment = 1
 txtfmt = b'%.30e'
 
 
@@ -38,14 +40,17 @@ class baofit3D:
 
         power = PowerTemplate(z=z, reconstructed=reconstructed)
         power.P(k, P_lin, n_mu_bins)
-        self.xi_multipole = power.xi_multipole
+        self.xi_multipole = {}
+        for ell in [0, 2, 4]:
+            self.xi_multipole[ell] = InterpolatedUnivariateSpline(
+                r, power.xi_multipole(r, ell=ell))
         self.polydeg = polydeg
         self.xi_temp_weighted = xi_temp_weighted
         # monoquad r vector, with factor to correct for pairs should have
         # slightly larger average pair distance than the bin center
         r_mask = (r_min < r) & (r < r_max)
         self.r = r[r_mask]
-        self.rv = np.hstack([self.r, self.r]) * 1.000396
+        self.rv = np.hstack([self.r, self.r])  # * 1.000396  # debug
         self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
         self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
         print('Shape of data vector:', self.dv.shape)
@@ -87,7 +92,7 @@ class baofit3D:
         orders = np.arange(ell_max//2)*2
         xi = 0
         for order in orders:
-            xi_ell = self.xi_multipole(r, ell=order)
+            xi_ell = self.xi_multipole[order](r)
             Ln = legendre(order)
             xi += xi_ell * Ln(mu)
         return xi*xi_temp_rescale
@@ -167,7 +172,8 @@ class baofit3D:
         self.make_model_vector(B0=B0, B2=B2)  # now make new mv with A hat
         return self.calculate_chisq(B0, B2)
 
-    def do_fit(self, armin=0.910, armax=1.040, arsp=0.005,
+    def do_fit(self,
+               armin=0.910, armax=1.040, arsp=0.005,
                atmin=0.990, atmax=1.040, atsp=0.005):
         '''
         armin=0.975, armax=1.035, arsp=0.0004
@@ -177,7 +183,7 @@ class baofit3D:
         ats = np.arange(atmin, atmax, atsp)
         chisq_grid = np.zeros((ars.size, ats.size))
         chisq_list = []
-        for i, j in product(range(ars.size), range(ats.size)):
+        for i, j in tqdm(product(range(ars.size), range(ats.size))):
             self.ar = ars[i]
             self.at = ats[j]
             self.make_xi_temp(weighted=self.xi_temp_weighted)
@@ -186,8 +192,9 @@ class baofit3D:
             chisq_min = self.B0_B2_optimize((B0, B2))
             chisq_grid[i, j] = chisq_min
             chisq_list.append([ars[i], ats[j], chisq_min])
-            print('Grid {}/{}, ({}, {}), {}'.format(
-                  i*ats.size+j+1, chisq_grid.size, ars[i], ats[j], chisq_min))
+            # print('Grid {}/{}, ({}, {}), {}'.format(
+            #         i*ats.size+j+1, chisq_grid.size,
+            #         ars[i], ats[j], chisq_min))
             # print('B0, B2, A:', B0, B2, self.A)
         return chisq_grid, np.array(chisq_list)
 
@@ -218,7 +225,7 @@ def baofit(argv):
         # find best B_0 from bias prior, reduced range
         print('Initializing bias prior instance')
         fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
-                        z=z, r_min=rmin, r_max=80, xi_temp_weighted=False)
+                        z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
         fit1.make_xi_temp()
         B0 = np.arange(0.1, 2, 0.01)  # template & data scale differ by 2 to 3
         chisq = np.zeros(B0.shape)
@@ -226,22 +233,26 @@ def baofit(argv):
             fit1.make_model_vector(B0[i], 1)  # A and widths set with init
             chisq[i] = fit1.calculate_chisq(B0[i], 1)
         assert np.any(chisq < chisq_min) is np.True_
-        print('Best fit prior B0 {}, chisq_min {}'
+        print('\nBest-fit prior B0 {}, chisq_min {}'
               .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
         fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
-                        z=z, r_min=rmin, r_max=150, xi_temp_weighted=False)
+                        z=z, r_min=rmin, r_max=150, xi_temp_weighted=True)
         fit2.B0 = B0[np.argmin(chisq)]  # new B0 prior for fit2
         fit2.B2 = fit2.B0  # same prior for B2
         fit2.B0_ln_width = 0.4
         fit2.B2_ln_width = 0.4
         chisq_grid, chisq_table = fit2.do_fit(
-            atmin=0.996, atmax=1.014, atsp=0.0008,
-            armin=0.986, armax=1.030, arsp=0.0008)
+            armin=0.982, armax=1.011, arsp=0.0004,
+            atmin=1.000, atmax=1.020, atsp=0.0004
+            )
         if not os.path.exists(os.path.dirname(path_chisq_grid)):
             os.mkdir(os.path.dirname(path_chisq_grid))
         np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
         np.savetxt(path_chisq_table, chisq_table, fmt=txtfmt)
+        ar, at, chisq = chisq_table[np.argmin(chisq_table[:, 2]), :]
+        print('\nBest-fit ar, at, chisq: ({}, {}), {}'
+              .format(ar, at, chisq))
     except Exception as E:
         print('Exception caught in worker thread {}'.format(path_xi_0))
         traceback.print_exc()

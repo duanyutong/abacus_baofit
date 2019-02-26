@@ -44,6 +44,8 @@ if run_recon:
     tag = sys.argv[3]
     model_name = sys.argv[4]
     save_dir = sys.argv[5]
+    bias = float(sys.argv[6])  # 2.23 for gal, 1.00 for ptcl
+    
     #******* Options *********
     #------ run -------
     ngridCube = 480
@@ -102,7 +104,7 @@ if run_recon:
     # last_sm = 10.0:  ite_times =  9, ite_weight_ini = ite_weight_2 = 0.5
     # last_sm = 15.0:  ite_times =  6, ite_weight_ini = ite_weight_2 = 0.7
     
-    bias = 2.23            #  2.23 for galaxies, 1.0 for matter field by default
+    # bias = 2.23            #  2.23 for galaxies, 1.0 for matter field by default
     bias_uncer = 0         #  uncertainty of bais 
                            #  -1 :   80 % 
                            #   0 :  100 %      
@@ -124,7 +126,13 @@ if run_recon:
     
     #----- file  -----
     #  general
-    typeobject = 2         # the type of object
+    # if sample == 'ptcl':
+    #     typeobject = 0
+    # elif sample == 'halo':
+    #     typeobject = 1
+    # elif sample == 'gal':
+    #     typeobject = 2
+    # typeobject = 2         # the type of object
                            #  0 :  matter
                            #  1 :  halo
                            #  2 :  galaxy (generated using HOD)
@@ -299,6 +307,11 @@ if run_recon:
                            .format(model_name, recon_tag, sig_sm))
     if os.path.isfile(outfile):
         os.remove(outfile)
+    if not os.path.exists(os.path.dirname(outfile)):
+        try:
+            os.makedirs(os.path.dirname(outfile))
+        except OSError:
+            pass
     outfile_corr = os.path.join(save_dir, '{}-auto-fftcorr_N-{}-{}_hmpc.txt'
                                 .format(model_name, recon_tag, sig_sm))
     outfile_corr2 = os.path.join(save_dir, '{}-auto-fftcorr_R-{}-{}_hmpc.txt'
@@ -394,9 +407,9 @@ if run_recon:
                "-outxcorrsh", outfile_xcorr_sh, \
                "-outxcorrde", outfile_xcorr_de \
                ]
+    # print('outfile path', outfile)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     cmd_run = ["./reconst_" + reconst + "_" + rsd] + OPTIONS
-    # print('Reconstruction command:', cmd_run)
-    # print(' '.join(cmd_run))
+    print('Reconstruction command:', ' '.join(cmd_run))
     # if (not inp_make and inp_run):
     subprocess.call(cmd_run)

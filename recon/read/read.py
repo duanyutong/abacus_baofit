@@ -6,29 +6,34 @@ This automizes the process running "read.cpp".
 '''
 
 import numpy as np
-import subprocess, sys, os
+import subprocess
+import sys
+import os
 
-phase = int(sys.argv[1])
-tag = sys.argv[2]
+path_data = sys.argv[1]
+sample = sys.argv[2]  # string "gal" or "ptcl"
+phase = int(sys.argv[3])
+tag = sys.argv[4]
 
-#******* Flags *********
-index_rsd  = "y"          #  to redshift-space
+# ******* Flags *********
+# index_rsd = ""          # to redshift-space
 
-##### simulation #####
-planck = "y"          #  for matter or HALO or GAL
-GAL    = "y"             #  for galaxie (hod)
+# simulation #####
+planck = "y"          # for matter or HALO or GAL
+# always treat particle subsamples as galaxies
+GAL = "y"  # if sample == "gal" else ""  # "y"             # for galaxie (hod)
 
-##### option #####
-SHIFT   = ""             #  to get "true" shift
-periodic = "y"           #  To use "periodic" boundary
-Random   = "y"           #  To compute "Random"
-Uniform  = "y"           #  To compute "Uniform" Random
-no_FKP   = "y"           #  Not to use "FKP" as weight
-inp_total_num = "y"      #  To input the total number of particles in advance
+# option #####
+# SHIFT = ""             # to get "true" shift
+periodic = "y"           # To use "periodic" boundary
+Random = "y"           # To compute "Random"
+Uniform = "y"           # To compute "Uniform" Random
+no_FKP = "y"           # Not to use "FKP" as weight
+inp_total_num = "y"      # To input the total number of particles in advance
 
-#******* Options *********
-data = np.fromfile('/home/dyt/store/recon/temp/gal_cat-'+tag+'.dat', dtype=np.float32).reshape(-1, 4)
-total_par_ori_inp = data.shape[0]  # number of galaxy data
+# ******* Options *********
+data = np.fromfile(path_data, dtype=np.float32).reshape(-1, 4)
+total_par_ori_inp = data.shape[0]  # number of positions
 
 ngridCube = 480
 ngrid = [-1, -1, -1]
@@ -45,19 +50,19 @@ z_ave = 0.500
 z_ini = 49.0
 
 power_k0 = 10000.0     # [Mpc/h]^3   along with DR12 [Ashley(2016)]
-Om_0 = 0.314153        #  matter parameter, planck
-Ol_0 = 0.685847        #  dark energy parameter, planck
-qperiodic = 1;
+Om_0 = 0.314153        # matter parameter, planck
+Ol_0 = 0.685847        # dark energy parameter, planck
+qperiodic = 1
 
-#----- Simulation -----
-typesim = 0            # the type of Simulation
-                       #  0 :  AbacusCosmos  (planck emulator, etc.)
-                       #  1 :  Others        (BOSS, etc.)
-                       #  2 :  ST            (T.Sunayama provided)
-boxsizesim = 1100      # if typesim = 0,  1100 or 720
+# ----- Simulation -----
+typesim = 0             # the type of Simulation
+                        # 0 :  AbacusCosmos  (planck emulator, etc.)
+                        # 1 :  Others        (BOSS, etc.)
+                        # 2 :  ST            (T.Sunayama provided)
+boxsizesim = 1100       # if typesim = 0,  1100 or 720
 # phase = 1           # the number of realization
 
-#----- file  -----
+# ----- file  -----
 #  general
 typeobject = 2         # the type of object
                        #  0 :  matter
@@ -66,7 +71,7 @@ typeobject = 2         # the type of object
 
                        # if typeobject = 0,
 qshift = 1             # includes the shift field files (_S)
-                       #  0 : not,  1 : yes
+                       # 0 : not,  1 : yes
 
 
                        # if typeobject = 1,
@@ -80,10 +85,12 @@ index_sc = 0 if sc == 0.000 else 1 if sc == 0.75 else 2 if sc == -0.75 else 3
 
 quniform = 1           # Random distributed "uniformly"
 #  final
-ratio_RtoD = -1        #  ratio of the number of Random and Data
-num_parcentage = 3     #  parcentage of particle used
+ratio_RtoD = -1        # ratio of the number of Random and Data
+num_parcentage = 3     # parcentage of particle used
 typeFKP = 0            # the type of estimator
                        #  0 : not FKP,  1 : FKP
+
+
 def flag_create():
     FLAG = []
     for k, v in globals().items():
@@ -91,26 +98,25 @@ def flag_create():
             FLAG.append("-D" + k)
     return FLAG
 
-FLAGS = flag_create()
 
-FLAGS_var = ["-Dmaxcep_ori=" + str(sep), \
-             "-Dpower_0=" + str(power_k0), \
-             "-Dnum_phase=" + str(phase), \
-             "-DM_cut=" + str(M_cut), \
-             "-Dindex_sc=" + str(index_sc), \
-             "-DNUM_GRID=" + str(ngridCube), \
-             "-Dtotal_par_ori_inp=" + str(total_par_ori_inp), \
-             "-Dtag=" + str(tag), \
-             "-Dredshift=" + str("{0:.3f}".format(z_ave)), \
-             "-Dindex_ratio_RtoD=" + str(ratio_RtoD), \
+FLAGS = flag_create()
+FLAGS_var = ["-Dmaxcep_ori=" + str(sep),
+             "-Dpower_0=" + str(power_k0),
+             "-Dnum_phase=" + str(phase),
+             "-DM_cut=" + str(M_cut),
+             "-Dindex_sc=" + str(index_sc),
+             "-DNUM_GRID=" + str(ngridCube),
+             "-Dtotal_par_ori_inp=" + str(total_par_ori_inp),
+             "-Dtag=" + str(tag),
+             "-Dredshift=" + str("{0:.3f}".format(z_ave)),
+             "-Dindex_ratio_RtoD=" + str(ratio_RtoD),
              "-Dindex_num_parcentage=" + str(num_parcentage)
              ]
 
-
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-cmd_make = ["g++", "read.cpp", "-march=native",  "-fopenmp", "-lgomp", "-fopt-info-vec-missed", \
-              "-fopt-info-vec-optimized", "-std=c++11", "-g", "-o", "read_"+tag+".out"] + FLAGS + FLAGS_var
+cmd_make = ["g++", "read.cpp", "-march=native",  "-fopenmp", "-lgomp",
+            "-fopt-info-vec-missed", "-fopt-info-vec-optimized",
+            "-std=c++11", "-g", "-o", "read_"+tag+".out"] + FLAGS + FLAGS_var
 subprocess.call(cmd_make)
-
 cmd_run = ["./read_"+tag+".out"]
 subprocess.call(cmd_run)

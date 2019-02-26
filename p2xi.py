@@ -178,12 +178,8 @@ class PowerTemplate:
         return np.real(xi_ell.reshape(r_input.shape))
 
 
-# %% unit test, do this in jupyter?
+# %% unit test
 if __name__ == '__main__':
-    # --- calculate Psmooth and xi using original LSS code ---
-
-    # --- calculate Psmooth and xi using current code ---
-    # read linear camb power spectrum
     r = np.arange(10, 300, 1)
     n_mu_bins = 1000
     path_p_lin = '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/emulator_1100box_planck_00-0_products/emulator_1100box_planck_00-0_power/info/camb_matterpower.dat'

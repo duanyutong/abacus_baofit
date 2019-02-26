@@ -839,7 +839,7 @@ class RVZelParticle {
         #ifdef GAL // gal
     struct_in_gal x_v[B];
         #else // matter
-    struct_in_x3v3 x_v[B];
+    struct_in_gal x_v[B];  // struct_in_x3v3 x_v[B];
         #endif
       #endif
     fprintf(stderr,"# Byte of x_v[]: %ld\n", sizeof(x_v[0]));
@@ -889,7 +889,7 @@ class RVZelParticle {
 
       // input files: definition
       #ifdef planck
-      string f_p = "particles_";
+      string f_p = "recon_array-" + ftag + ".dat"; //string f_p = "particles_";
       string f_p_id = "particle_ids_";
       string f_f = "field_particles_";
       string f_f_id = "field_ids_";
@@ -905,7 +905,7 @@ class RVZelParticle {
           #else
       string index_rsd_st = "";
           #endif
-          string f_h = "gal_cat-" + ftag + ".dat"; // string f_h = "GRAND_HOD" + p_op + index_rsd_st;
+          string f_h = "recon_array-" + ftag + ".dat"; // string f_h = "GRAND_HOD" + p_op + index_rsd_st;
           string l_h = "";
           num_file = "";
         #endif
@@ -1012,7 +1012,7 @@ class RVZelParticle {
 
         FILE *fp_in_par, *fp_in_par_id;
         fp_in_par = fopen(particles, "rb");
-        assert(fp_in_par!=NULL);
+        assert(fp_in_par!=NULL);  // problem
 
           #ifdef SHIFT
             // input files(.particle_ids): string >> char
