@@ -39,7 +39,7 @@ class baofit3D:
                  z=0.5, r_min=50, r_max=150, xi_temp_weighted=False):
 
         power = PowerTemplate(z=z, reconstructed=reconstructed)
-        power.P(k, P_lin, n_mu_bins)
+        power.P(k, P_lin, n_mu_bins, beta=0.25)
         self.xi_multipole = {}
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
@@ -201,18 +201,19 @@ class baofit3D:
 
 def baofit(argv):
     try:
-        # save_dir = '/home/dyt/store/emulator_1100box_planck-norsd/'
         z, path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
             path_chisq_grid, path_chisq_table, recon = argv
+        print('Saving chisq to:', os.path.dirname(path_chisq_grid))
         data = np.loadtxt(path_p_lin)
         k = data[:, 0]
         P_lin = data[:, 1]
         data = np.loadtxt(path_xi_0)
-        r = data[:, 0]
+        r = data[:, 0] * 1.000396
         xi_0 = data[:, 1]
         xi_2 = np.loadtxt(path_xi_2)[:, 1]
         cov = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
         assert type(recon) is bool
+        print('xi samplesa are reconstructed:', recon)
         try:
             assert (r.size == xi_0.size == xi_2.size
                     == cov.shape[0]/2 == cov.shape[1]/2)
@@ -223,7 +224,7 @@ def baofit(argv):
             print('NaN values in cov at: ', np.where(cov == np.nan))
             raise Exception
         # find best B_0 from bias prior, reduced range
-        print('Initializing bias prior instance')
+        # print('Initializing bias prior instance')
         fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
                         z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
         fit1.make_xi_temp()
@@ -233,8 +234,8 @@ def baofit(argv):
             fit1.make_model_vector(B0[i], 1)  # A and widths set with init
             chisq[i] = fit1.calculate_chisq(B0[i], 1)
         assert np.any(chisq < chisq_min) is np.True_
-        print('\nBest-fit prior B0 {}, chisq_min {}'
-              .format(B0[np.argmin(chisq)], np.min(chisq)))
+        # print('\nBest-fit prior B0 {}, chisq_min {}'
+        #       .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
         fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
                         z=z, r_min=rmin, r_max=150, xi_temp_weighted=True)
