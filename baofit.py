@@ -24,7 +24,6 @@ from tqdm import tqdm
 # fout = ft
 n_mu_bins = 1000
 chisq_min = 1500
-xi_temp_rescale = 0.9  # to match biased galaxy sample pair-counting reults
 r_avg_increment = 1
 txtfmt = b'%.30e'
 r_rescale_factor = 1.002
@@ -37,11 +36,12 @@ def matmul(*args):
 class baofit3D:
 
     def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg,
-                 reconstructed, force_isotropic,
-                 z=0.5, r_min=50, r_max=150, xi_temp_weighted=False):
+                 reconstructed, force_isotropy,
+                 z=0.5, r_min=50, r_max=150,
+                 xi_temp_weighted=False, xi_temp_rescale=1):
 
         power = PowerTemplate(z=z, reconstructed=reconstructed,
-                              force_isotropic=force_isotropic)
+                              force_isotropy=force_isotropy)
         power.P(k, P_lin, n_mu_bins)
         self.xi_multipole = {}
         for ell in [0, 2, 4]:
@@ -49,6 +49,7 @@ class baofit3D:
                 r, power.xi_multipole(r, ell=ell))
         self.polydeg = polydeg
         self.xi_temp_weighted = xi_temp_weighted
+        self.xi_temp_rescale = xi_temp_rescale
         # monoquad r vector, with factor to correct for pairs should have
         # slightly larger average pair distance than the bin center
         r_mask = (r_min < r) & (r < r_max)
@@ -56,7 +57,10 @@ class baofit3D:
         self.rv = np.hstack([self.r, self.r])  # * 1.000396  # debug
         self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
         self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
-        print('Shape of data vector:', self.dv.shape)
+        print(('Reconstructed: {}, force isotropy: {}, '
+               'xi template rescale factor: {}, shape of data vector: {}')
+              .format(reconstructed, force_isotropy,
+                      xi_temp_rescale, self.dv.shape))
         ri_mask = np.tile(r_mask, (len(r_mask), 1)).T
         rj_mask = np.tile(r_mask, (len(r_mask), 1))
         quadrant_mask = ri_mask & rj_mask
@@ -98,7 +102,7 @@ class baofit3D:
             xi_ell = self.xi_multipole[order](r)
             Ln = legendre(order)
             xi += xi_ell * Ln(mu)
-        return xi*xi_temp_rescale
+        return xi*self.xi_temp_rescale
 
     def xi_temp_components(self, r, component='mu2'):
         ''' rescaled xi_0, xi_2, xi_mu_2 as a function of 1D r array '''
@@ -120,7 +124,7 @@ class baofit3D:
         assert self.r.size == xi.size
         return xi
 
-    def make_xi_temp(self, weighted=False):
+    def make_xi_temp(self, weighted=True):
         ''' xi_0, xi_2, xi_mu_2 over r bin, weighted by r^2 integral '''
         if not hasattr(self, 'xitemp'):
             self.xitemp = {}
@@ -227,15 +231,20 @@ def baofit(argv):
             print('NaN values in cov at: ', np.where(cov == np.nan))
             raise Exception
         # find best B_0 from bias prior, reduced range
-        # print('Initializing bias prior instance')
-        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
-                        z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
-        fit1.make_xi_temp()
+        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
+                       z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
+        fit.make_xi_temp(weighted=fit.xi_temp_weighted)
+        # determine best-fit rescaling factor and target bias using xi_0
+        xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
+            fit.xitemp['0'].T, fit.xitemp['0'])
+        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
+                       z=z, r_min=rmin, r_max=80,
+                       xi_temp_weighted=True, xi_temp_rescale=xi_temp_rescale)
         B0_list = np.arange(0.1, 2, 0.01)
         chisq = np.zeros(B0_list.shape)
         for i, B0 in enumerate(B0_list):
-            fit1.make_model_vector(B0, 1)  # A and widths set with init
-            chisq[i] = fit1.calculate_chisq(B0, 1)
+            fit.make_model_vector(B0, 1)  # A and widths set with init
+            chisq[i] = fit.calculate_chisq(B0, 1)
             # print('Prior B0, B2, chisq: {}, 1, {}'.format(B0, chisq[i]))
         assert np.any(chisq < chisq_min) is np.True_, \
             ('B0 = {} at lowest chisq = {} > chisq_min,'
@@ -243,13 +252,13 @@ def baofit(argv):
         # print('\nBest-fit prior B0 {}, chisq_min {}'
         #       .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
-        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
-                        z=z, r_min=rmin, r_max=150, xi_temp_weighted=True)
-        fit2.B0 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
-        fit2.B2 = fit2.B0  # same prior for B2
-        fit2.B0_ln_width = 0.4
-        fit2.B2_ln_width = 0.4
-        chisq_grid, chisq_table = fit2.do_fit(
+        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
+                       z=z, r_min=rmin, r_max=150,
+                       xi_temp_weighted=True, xi_temp_rescale=xi_temp_rescale)
+        fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
+        fit.B0_ln_width = 0.4
+        fit.B2_ln_width = 0.4
+        chisq_grid, chisq_table = fit.do_fit(
             armin=0.988, armax=1.012, arsp=0.0003,
             atmin=0.989, atmax=1.011, atsp=0.0003
             )

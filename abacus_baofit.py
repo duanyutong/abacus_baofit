@@ -34,12 +34,12 @@ from Abacus import Halotools as abacus_ht  # Abacus
 
 
 # %% custom settings
-# sim_name_prefix = 'AbacusCosmos_1100box_planck'
-# tagout = ''
-# phases = range(20)
-sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+sim_name_prefix = 'AbacusCosmos_1100box_planck'
+tagout = 'mmatter'
+phases = range(20)
+#sim_name_prefix = 'emulator_1100box_planck'
+#tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
+#phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_ass1',  'gen_ass1_n',
                'gen_ass2',  'gen_ass2_n',
@@ -1158,53 +1158,53 @@ def run_baofit_parallel(baofit_phases):
 
 if __name__ == "__main__":
 
-#    fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
-#                 phases=phases)
-#    for phase in phases:
-#        global halocat
-#        if 'matter' in model_names:
-#            halocat = make_halocat(phase, halo_type='FoF')
-#            print('\nSkipping halocat processing, analysing matter field...')
-#        else:
-#            halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
-#        for model_name in model_names:
-#            print('---\nWorking on {} realisations, phase {}, model {}...'
-#                  .format(len(reals), phase, model_name))
-#            with closing(MyPool(processes=int(np.ceil(len(reals)/2)),
-#                                maxtasksperchild=1)) as p:
-#                p.map(partial(do_galaxy_table,
-#                              phase=phase, model_name=model_name,
-#                              overwrite=False),
-#                      reals)
-#                p.close()
-#                p.join()
-#            with closing(MyPool(processes=N_concurrent_reals,
-#                                maxtasksperchild=1)) as p:
-#                p.map(partial(
-#                        do_realisation, phase=phase, model_name=model_name,
-#                        overwrite=True,
-#                        do_pre_auto_smu=False, do_pre_auto_rppi=False,
-#                        do_pre_auto_fft=False, do_pre_cross=False,
-#                        do_recon_std=True, do_post_auto_rppi=False,
-#                        do_post_cross=True, do_recon_ite=False,
-#                        do_pre_auto_corr=False, do_post_auto_corr=False,
-#                        do_pre_cross_corr=False, do_post_cross_corr=True),
-#                      reals)
-#                p.close()
-#                p.join()
-#            print('---\nPool closed cleanly for model {}.\n---'
-#                  .format(model_name))
-#        with closing(MyPool(processes=len(model_names),  # len(model_names),
-#                            maxtasksperchild=1)) as p:
-#            p.map(partial(coadd_realisations, phase=phase, reals=reals),
-#                  model_names)
-#            p.close()
-#            p.join()
-#    combine_galaxy_table_metadata(phases)
-#    with closing(MyPool(processes=len(model_names),
-#                        maxtasksperchild=1)) as p:
-#        p.map(coadd_phases, model_names)
-#        p.map(do_cov, model_names)
-#        p.close()
-#        p.join()
+    fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
+                 phases=phases)
+    for phase in phases:
+        global halocat
+        if 'matter' in model_names:
+            halocat = make_halocat(phase, halo_type='FoF')
+            print('\nSkipping halocat processing, analysing matter field...')
+        else:
+            halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
+        for model_name in model_names:
+            print('---\nWorking on {} realisations, phase {}, model {}...'
+                  .format(len(reals), phase, model_name))
+            with closing(MyPool(processes=int(np.ceil(len(reals)/2)),
+                                maxtasksperchild=1)) as p:
+                p.map(partial(do_galaxy_table,
+                              phase=phase, model_name=model_name,
+                              overwrite=False),
+                      reals)
+                p.close()
+                p.join()
+            with closing(MyPool(processes=N_concurrent_reals,
+                                maxtasksperchild=1)) as p:
+                p.map(partial(
+                        do_realisation, phase=phase, model_name=model_name,
+                        overwrite=True,
+                        do_pre_auto_smu=False, do_pre_auto_rppi=False,
+                        do_pre_auto_fft=False, do_pre_cross=False,
+                        do_recon_std=True, do_post_auto_rppi=False,
+                        do_post_cross=True, do_recon_ite=False,
+                        do_pre_auto_corr=False, do_post_auto_corr=False,
+                        do_pre_cross_corr=False, do_post_cross_corr=True),
+                      reals)
+                p.close()
+                p.join()
+            print('---\nPool closed cleanly for model {}.\n---'
+                  .format(model_name))
+        with closing(MyPool(processes=len(model_names),  # len(model_names),
+                            maxtasksperchild=1)) as p:
+            p.map(partial(coadd_realisations, phase=phase, reals=reals),
+                  model_names)
+            p.close()
+            p.join()
+    combine_galaxy_table_metadata(phases)
+    with closing(MyPool(processes=len(model_names),
+                        maxtasksperchild=1)) as p:
+        p.map(coadd_phases, model_names)
+        p.map(do_cov, model_names)
+        p.close()
+        p.join()
     run_baofit_parallel(baofit_phases=phases)

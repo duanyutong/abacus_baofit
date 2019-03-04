@@ -26,14 +26,14 @@ def W(kR):
 
 class PowerTemplate:
 
-    def __init__(self, reconstructed=True, force_isotropic=False, z=0.5,
+    def __init__(self, reconstructed=True, force_isotropy=False, z=0.5,
                  ombhsq=0.02222, omhsq=0.14212,
                  sigma8=0.830, h=0.6726, ns=0.9652, Tcmb0=2.725):
         # print('Power Temp is isotropic: ', isotropic)
         self.z = z
         self.h = h
         self.reconstructed = reconstructed
-        self.force_isotropic = force_isotropic
+        self.force_isotropy = force_isotropy
         self.ombhsq = ombhsq  # Omega matter baryon
         self.omhsq = omhsq  # Omega matter (baryon + CDM)
         self.om = omhsq/np.square(h)
@@ -134,7 +134,7 @@ class PowerTemplate:
         else:
             Sigma_perp = 6  # Mpc/h
             Sigma_para = 10  # Mpc/h
-        if self.force_isotropic:
+        if self.force_isotropy:
             Sigma_perp = Sigma_para = np.mean([Sigma_perp, Sigma_para])
             beta = 0
             print('Forcing beta = 0')
