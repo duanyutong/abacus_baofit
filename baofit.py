@@ -23,10 +23,11 @@ from tqdm import tqdm
 # bc = '.txt'  # bc = 'post_recon_bincent'+str(binc)+'.dat'
 # fout = ft
 n_mu_bins = 1000
-chisq_min = 1000
-xi_temp_rescale = 2.9
+chisq_min = 1500
+xi_temp_rescale = 0.9  # to match biased galaxy sample pair-counting reults
 r_avg_increment = 1
 txtfmt = b'%.30e'
+r_rescale_factor = 1.002
 
 
 def matmul(*args):
@@ -35,11 +36,13 @@ def matmul(*args):
 
 class baofit3D:
 
-    def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg, reconstructed,
+    def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg,
+                 reconstructed, force_isotropic,
                  z=0.5, r_min=50, r_max=150, xi_temp_weighted=False):
 
-        power = PowerTemplate(z=z, reconstructed=reconstructed)
-        power.P(k, P_lin, n_mu_bins, beta=0.25)
+        power = PowerTemplate(z=z, reconstructed=reconstructed,
+                              force_isotropic=force_isotropic)
+        power.P(k, P_lin, n_mu_bins)
         self.xi_multipole = {}
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
@@ -202,18 +205,18 @@ class baofit3D:
 def baofit(argv):
     try:
         z, path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
-            path_chisq_grid, path_chisq_table, recon = argv
+            path_chisq_grid, path_chisq_table, recon, iso = argv
         print('Saving chisq to:', os.path.dirname(path_chisq_grid))
         data = np.loadtxt(path_p_lin)
         k = data[:, 0]
         P_lin = data[:, 1]
         data = np.loadtxt(path_xi_0)
-        r = data[:, 0] * 1.000396
+        r = data[:, 0] * r_rescale_factor
         xi_0 = data[:, 1]
         xi_2 = np.loadtxt(path_xi_2)[:, 1]
         cov = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
         assert type(recon) is bool
-        print('xi samplesa are reconstructed:', recon)
+        # print('xi samplesa are reconstructed:', recon)
         try:
             assert (r.size == xi_0.size == xi_2.size
                     == cov.shape[0]/2 == cov.shape[1]/2)
@@ -225,27 +228,30 @@ def baofit(argv):
             raise Exception
         # find best B_0 from bias prior, reduced range
         # print('Initializing bias prior instance')
-        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
+        fit1 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
                         z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
         fit1.make_xi_temp()
-        B0 = np.arange(0.1, 2, 0.01)  # template & data scale differ by 2 to 3
-        chisq = np.zeros(B0.shape)
-        for i in range(B0.size):
-            fit1.make_model_vector(B0[i], 1)  # A and widths set with init
-            chisq[i] = fit1.calculate_chisq(B0[i], 1)
-        assert np.any(chisq < chisq_min) is np.True_
+        B0_list = np.arange(0.1, 2, 0.01)
+        chisq = np.zeros(B0_list.shape)
+        for i, B0 in enumerate(B0_list):
+            fit1.make_model_vector(B0, 1)  # A and widths set with init
+            chisq[i] = fit1.calculate_chisq(B0, 1)
+            # print('Prior B0, B2, chisq: {}, 1, {}'.format(B0, chisq[i]))
+        assert np.any(chisq < chisq_min) is np.True_, \
+            ('B0 = {} at lowest chisq = {} > chisq_min,'
+             .format(B0_list[np.argmin(chisq)], chisq.min()))
         # print('\nBest-fit prior B0 {}, chisq_min {}'
         #       .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
-        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon,
+        fit2 = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
                         z=z, r_min=rmin, r_max=150, xi_temp_weighted=True)
-        fit2.B0 = B0[np.argmin(chisq)]  # new B0 prior for fit2
+        fit2.B0 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit2.B2 = fit2.B0  # same prior for B2
         fit2.B0_ln_width = 0.4
         fit2.B2_ln_width = 0.4
         chisq_grid, chisq_table = fit2.do_fit(
-            armin=0.982, armax=1.011, arsp=0.0004,
-            atmin=1.000, atmax=1.020, atsp=0.0004
+            armin=0.988, armax=1.012, arsp=0.0003,
+            atmin=0.989, atmax=1.011, atsp=0.0003
             )
         if not os.path.exists(os.path.dirname(path_chisq_grid)):
             os.mkdir(os.path.dirname(path_chisq_grid))

@@ -26,12 +26,14 @@ def W(kR):
 
 class PowerTemplate:
 
-    def __init__(self, reconstructed=True, z=0.5,
+    def __init__(self, reconstructed=True, force_isotropic=False, z=0.5,
                  ombhsq=0.02222, omhsq=0.14212,
                  sigma8=0.830, h=0.6726, ns=0.9652, Tcmb0=2.725):
+        # print('Power Temp is isotropic: ', isotropic)
         self.z = z
         self.h = h
         self.reconstructed = reconstructed
+        self.force_isotropic = force_isotropic
         self.ombhsq = ombhsq  # Omega matter baryon
         self.omhsq = omhsq  # Omega matter (baryon + CDM)
         self.om = omhsq/np.square(h)
@@ -50,7 +52,7 @@ class PowerTemplate:
 
     def T0(self, k):
         '''
-        Zero-baryon transfer function shape from E&H98
+        Zero-baryon transfer function shape from E&H98, input k in h/Mpc
         '''
         k = k * self.h  # convert unit of k from h/Mpc to 1/Mpc
         #  Eqn 26, approximate sound horizon in Mpc
@@ -101,7 +103,7 @@ class PowerTemplate:
         olz = ol/np.square(self.cosmology.efunc(self.z))  # MBW Eqn 3.77
         g0 = 5/2*om/(np.power(om, 4/7) - ol + ((1+om/2)*(1+ol/70)))  # Eqn 4.76
         gz = 5/2*omz/(np.power(omz, 4/7) - olz + ((1+omz/2)*(1+olz/70)))
-        Dlin_ratio = gz / g0 / (1+self.z)
+        Dlin_ratio = gz / (1+self.z) / g0
         Psmooth = self.P0smooth * np.square(self.T0(k)) * \
             np.power(k, self.ns) * np.square(Dlin_ratio)
         return Psmooth
@@ -124,7 +126,7 @@ class PowerTemplate:
         try:
             assert P_lin.size == P_nw.size
         except AssertionError:
-            print("P shapes are", P_lin.shape, P_nw.shape)
+            print('P shapes are', P_lin.shape, P_nw.shape)
         Sigma_r = 15  # Mpc/h
         if self.reconstructed:
             Sigma_perp = 2.5  # Mpc/h
@@ -132,6 +134,10 @@ class PowerTemplate:
         else:
             Sigma_perp = 6  # Mpc/h
             Sigma_para = 10  # Mpc/h
+        if self.force_isotropic:
+            Sigma_perp = Sigma_para = np.mean([Sigma_perp, Sigma_para])
+            beta = 0
+            print('Forcing beta = 0')
         sigmavsq = (1 - np.square(mu))*np.square(Sigma_perp)/2 \
             + np.square(mu*Sigma_para)/2
         S = np.exp(-np.square(k*Sigma_r)/2)

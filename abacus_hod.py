@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed May  9 20:34:08 2018
-
+halo_m_prop
 @author: Duan Yutong (dyt@physics.bu.edu)
 
 halo/galaxy/particle tables have the following default units:
@@ -24,11 +24,9 @@ import numpy as np
 from scipy.special import erfc
 from halotools.empirical_models import PrebuiltHodModelFactory
 from astropy import table
-from Abacus import Halotools as abacus_ht  # Abacus' "Halotools" for importing Abacus
+from Abacus import Halotools as abacus_ht
 import matplotlib.pyplot as plt
 # plt.switch_backend('Agg')  # switch this on if backend error is reported
-
-matter_subsample_fraction = 0.01
 
 
 # %% MP Class
@@ -393,7 +391,7 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir', perihelion=False,
     return pt
 
 
-def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
+def initialise_model(redshift, model_name, halo_m_prop='halo_m'):
 
     '''
     create an instance of halotools model class
@@ -650,29 +648,30 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_mvir'):
     return model
 
 
-def populate_model(halocat, model, gt_path=''):
+def populate_model(halocat, model, gt_path='',
+                   matter_subsample_fraction=0.001):
 
     # use halotools HOD
     if model.model_type == 'matter':
-        print('Matter field')
+        print('Creating particle table from matter field...')
         model.populate_mock(halocat, Num_ptcl_requirement=10000)
-        pt = halocat.halo_ptcl_table
+        pt = halocat.ptcl_table  # require FoF halo cat including field ptcl
         idx = np.random.choice(np.arange(len(pt)),
-                               size=int(len(pt)*matter_subsample_fraction),
+                               size=int(len(pt)/0.1*matter_subsample_fraction),
                                replace=False)
         # random choose a subset of the 10% subsample
         tb = pt[idx]
         for pos in ['x', 'y', 'z']:
             tb[pos] = tb[pos].astype(np.float32)
-        model.mock.particle_table = tb
-        model.mock.ND = len(model.mock.particle_table)
+        model.mock.ptcl_table = tb
+        model.mock.ND = len(model.mock.ptcl_table)
+        print('{:.1f} percent, or {:.1E}, of {:.1E} total particles chosen'
+              .format(matter_subsample_fraction*100, idx.size, len(pt)))
     elif model.model_type == 'prebuilt':
-
         print('Populating {} halos with N_cut = {} for r = {:2d}'
               'using prebuilt model {} ...'
               .format(len(halocat.halo_table), model.N_cut,
                       model.r, model.model_name))
-
         if hasattr(model, 'mock'):  # already populated once, just re-populate
             model.mock.populate()
         else:  # model was never populated and mock attribute does not exist
@@ -690,7 +689,7 @@ def populate_model(halocat, model, gt_path=''):
             model.populate_mock(halocat, Num_ptcl_requirement=10000)
             # halo_table already had N_cut correction, just copy tables
             model.mock.halo_table = halocat.halo_table
-            model.mock.halo_ptcl_table = halocat.halo_ptcl_table
+            model.mock.halo_ptcl_table = halocat.halo_ptcl_table  # Rockstar
         if gt_path == '' or not os.path.isfile(gt_path):
             # generate galaxy catalogue and overwrite model.mock.galaxy_table
             print('r = {:2d}, populating {} halos, ...'
@@ -885,6 +884,6 @@ def make_galaxies(model):
     # combine centrals table and satellites table
     model.mock.galaxy_table = table.vstack([gt_cen, gt_sat],
                                            join_type='outer')
-    model.mock.halo_ptcl_table = pt  # this may be redundant and unnecessary
+    model.mock.halo_ptcl_table = pt  # this may be redundant
 
     return model

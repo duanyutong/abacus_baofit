@@ -22,7 +22,7 @@ from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
     spherical_sector_volume
 from halotools.mock_observables.two_point_clustering.rp_pi_tpcf import \
     cylinder_volume
-from halotools.utils import add_halo_hostid
+# from halotools.utils import add_halo_hostid
 from Corrfunc.theory.DDsmu import DDsmu
 from Corrfunc.theory.DDrppi import DDrppi
 from Corrfunc.utils import convert_rp_pi_counts_to_wp
@@ -37,12 +37,9 @@ from Abacus import Halotools as abacus_ht  # Abacus
 # sim_name_prefix = 'AbacusCosmos_1100box_planck'
 # tagout = ''
 # phases = range(20)
-# prod_dir = '/mnt/gosling1/bigsim_products/AbacusCosmos_1100box_planck_products/'
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'matter'  # 'norsd'  # 'matter'  # 'z0.5'
+tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
-prod_dir = '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
-
 model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_ass1',  'gen_ass1_n',
                'gen_ass2',  'gen_ass2_n',
@@ -52,19 +49,17 @@ model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_sp1',   'gen_sp1_n']
 model_names = ['matter']
 reals = range(1)  # range(12)
-use_matter_field = True
+N_threads = 24  # number of threads for a single realisation
 
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
 L = 1100  # boxsize in 1D
 N_cut = 70  # number particle cut, 70 corresponds to 4e12 Msun
 N_concurrent_reals = 4
-N_threads = 16  # number of threads for a single realisation
 N_sub = 3  # number of subvolumes per dimension
-random_multiplier = 10
-
-matter_subsample_fraction = 0.01
-galaxy_bias = 2.23
+random_multiplier = 5
+galaxy_bias = 2.23  # FFTcorr always unbiased, but need to match paircount cov
+matter_subsample_fraction = 0.002
 
 # %% flags
 save_hod_realisation = True
@@ -87,9 +82,13 @@ rp_bins = pi_bins
 store_dir = '/home/dyt/store/'
 save_dir = os.path.join(store_dir, sim_name_prefix+'-'+tagout)
 recon_temp_dir = os.path.join(store_dir, 'recon/temp')
-halo_type = 'Rockstar'
-halo_m_prop = 'halo_mvir'  # mgrav is better but not using sub or small haloes
 txtfmt = b'%.30e'
+if sim_name_prefix == 'emulator_1100box_planck':
+    prod_dir = \
+        '/mnt/gosling2/bigsim_products/emulator_1100box_planck_products/'
+elif sim_name_prefix == 'AbacusCosmos_1100box_planck':
+    prod_dir = \
+        '/mnt/gosling1/bigsim_products/AbacusCosmos_1100box_planck_products/'
 
 
 # %% definitionss of statisical formulae and convenience functions
@@ -231,35 +230,47 @@ def coadd_correlation(corr_list):
 
 # %% functions for tasks
 
-def make_halocat(phase):
+def make_halocat(phase, halo_type='Rockstar'):
 
+    if halo_type == 'Rockstar':
+        load_halo_ptcl = True
+        load_all_ptcl = False
+        halo_m_prop = 'halo_mvir'
+    elif halo_type == 'FoF':
+        load_halo_ptcl = False
+        load_all_ptcl = True
+        halo_m_prop = 'halo_m547m'
     print('---\n'
-          + 'Importing phase {} halo catelogue from: \n'.format(phase)
+          + 'Importing phase {} {} halocat from: \n'.format(phase, halo_type)
           + '{}{}_{:02}-{}_products/z{}/'
             .format(prod_dir, sim_name_prefix, cosmology, phase, redshift)
           + '\n---')
-    halocat = abacus_ht.make_catalogs(
+    halocat = abacus_ht.make_catalogs(  # load one phase at a time to save ram
         sim_name=sim_name_prefix, products_dir=prod_dir,
         redshifts=[redshift], cosmologies=[cosmology], phases=[phase],
-        halo_type=halo_type,
-        load_halo_ptcl_catalog=True,  # this loads 10% particle subsamples
-        load_ptcl_catalog=False,  # this loads uniform subsamples, dnw
-        load_pids=False)[0][0][0]
-    # fill in fields required by HOD models
-    if 'halo_mgrav' not in halocat.halo_table.keys():
-        print('halo_mgrav field missing in halo table')
-    if 'halo_mvir' not in halocat.halo_table.keys():
-        halocat.halo_table['halo_mvir'] = halocat.halo_table['halo_m']
-        print('halo_mvir field missing, assuming halo_mvir = halo_m')
-    if 'halo_rvir' not in halocat.halo_table.keys():
-        halocat.halo_table['halo_rvir'] = halocat.halo_table['halo_r']
-        print('halo_rvir field missing, assuming halo_rvir = halo_r')
-    add_halo_hostid(halocat.halo_table, delete_possibly_existing_column=True)
-    # setting NFW concentration using scale radius
-    # klypin_rs is more stable and better for small halos
-    # can be improved following https://arxiv.org/abs/1709.07099
-    halocat.halo_table['halo_nfw_conc'] = (
-        halocat.halo_table['halo_rvir'] / halocat.halo_table['halo_klypin_rs'])
+        halo_type=halo_type, load_pids=False,
+        load_halo_ptcl_catalog=load_halo_ptcl, load_ptcl_catalog=load_all_ptcl,
+        )[0][0][0]
+    halocat.halo_m_prop = halo_m_prop
+    # add_halo_hostid(halocat.halo_table, delete_possibly_existing_column=True)
+    if halo_type == 'Rockstar':
+        # fill in fields required by HOD models
+        if 'halo_mvir' not in halocat.halo_table.keys():
+            halocat.halo_table['halo_mvir'] = halocat.halo_table['halo_m']
+            print('halo_mvir field missing, assuming halo_mvir = halo_m')
+        if 'halo_rvir' not in halocat.halo_table.keys():
+            halocat.halo_table['halo_rvir'] = halocat.halo_table['halo_r']
+            print('halo_rvir field missing, assuming halo_rvir = halo_r')
+        # setting NFW concentration using scale radius
+        # klypin_rs is more stable and better for small halos
+        # can be improved following https://arxiv.org/abs/1709.07099
+        halocat.halo_table['halo_nfw_conc'] = (
+            halocat.halo_table['halo_rvir']
+            / halocat.halo_table['halo_klypin_rs'])
+    elif halo_type == 'FoF':
+        halocat.halo_table['halo_mvir'] = halocat.halo_table['halo_m547m']
+        halocat.halo_table['halo_rvir'] = halocat.halo_table['halo_r547m']
+        halocat.halo_table['halo_nfw_conc'] = 0
     return halocat
 
 
@@ -275,7 +286,7 @@ def do_auto_count(model, mode='smu-pre-recon'):
     model_name = model.model_name
     ND = model.mock.ND
     if model.model_type == 'matter':
-        tb = model.mock.particle_table
+        tb = model.mock.ptcl_table
     else:
         tb = model.mock.galaxy_table
     x, y, z = tb['x'], tb['y'], tb[model.zfield]
@@ -442,7 +453,7 @@ def do_subcross_count(model, mode='smu-post-recon-std'):
     model_name = model.model_name
     redshift = model.mock.redshift
     if model.model_type == 'matter':
-        tb = model.mock.particle_table
+        tb = model.mock.ptcl_table
     else:
         tb = model.mock.galaxy_table
     x1, y1, z1 = tb['x'], tb['y'], tb[model.zfield]
@@ -618,7 +629,7 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
         seed = phase*100 + r
         # all realisations in parallel, each model needs to be instantiated
         model = initialise_model(redshift, model_name,
-                                 halo_m_prop=halo_m_prop)
+                                 halo_m_prop=halocat.halo_m_prop)
         model.N_cut = N_cut  # add useful model properties here
         model.c_median_poly = np.poly1d(np.loadtxt(os.path.join(
                 store_dir, sim_name_prefix, 'c_median_poly.txt')))
@@ -626,8 +637,9 @@ def do_galaxy_table(r, phase, model_name, overwrite=False):
         # random seed w/ phase and realisation index r, model independent
         print('r = {:2d} for phase {}, model {} starting...'
               .format(r, phase, model_name))
-        model = populate_model(halocat, model,
-                               gt_path=(not overwrite)*gt_path)
+        model = populate_model(
+            halocat, model, gt_path=(not overwrite)*gt_path,
+            matter_subsample_fraction=matter_subsample_fraction)
         gt = model.mock.galaxy_table
         # save galaxy table if it's not already loaded from disk
         if save_hod_realisation and not model.mock.gt_loaded:
@@ -670,7 +682,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
                    do_pre_auto_corr=True, do_post_auto_corr=True,
                    do_pre_cross_corr=True, do_post_cross_corr=True):
 
-    global halocat
+    # global halocat
     try:  # this helps catch exception in a worker thread of multiprocessing
         seed = phase*100 + r
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -727,7 +739,7 @@ def do_realisation(r, phase, model_name, overwrite=False,
             assert halocat.ZD_Seed == phase or halocat.ZD_Seed == 100 + phase
             # all realisations in parallel, each model needs to be instantiated
             model = initialise_model(redshift, model_name,
-                                     halo_m_prop=halo_m_prop)
+                                     halo_m_prop=halocat.halo_m_prop)
             model.r = r
             if use_rsd or model_name == 'matter':
                 model.zfield = 'z'
@@ -736,9 +748,11 @@ def do_realisation(r, phase, model_name, overwrite=False,
             # random seed w/ phase and realisation index r, model independent
             print('r = {:2d} for phase {}, model {} starting...'
                   .format(r, phase, model_name))
-            model = populate_model(halocat, model, gt_path=gt_path)
+            model = populate_model(
+                halocat, model, gt_path=gt_path,
+                matter_subsample_fraction=matter_subsample_fraction)
             if model_name == 'matter':
-                tb = model.mock.particle_table
+                tb = model.mock.ptcl_table
                 sample_type = 'ptcl'
                 bias = 1
             else:
@@ -1132,7 +1146,7 @@ def run_baofit_parallel(baofit_phases):
                 path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
                 list_of_inputs.append(
                     [redshift, path_p_lin, path_xi_0, path_xi_2, path_cov,
-                     '3', rmin, path_cg, path_ct, recon])
+                     '3', rmin, path_cg, path_ct, recon, (not use_rsd)])
                 # list_lwv.append([path_xi_0, path_xi_2, path_cov, fout_tag,
                 #                  '3', rmin])
     with closing(MyPool(processes=len(phases),
@@ -1148,8 +1162,8 @@ if __name__ == "__main__":
 #                 phases=phases)
 #    for phase in phases:
 #        global halocat
-#        halocat = make_halocat(phase)
 #        if 'matter' in model_names:
+#            halocat = make_halocat(phase, halo_type='FoF')
 #            print('\nSkipping halocat processing, analysing matter field...')
 #        else:
 #            halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
