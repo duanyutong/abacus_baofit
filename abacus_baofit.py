@@ -32,6 +32,7 @@ from abacus_hod import MyPool, fit_c_median, process_rockstar_halocat, \
 from tqdm import tqdm
 from shutil import copyfile
 from Abacus import Halotools as abacus_ht  # Abacus
+from baofit import baofit
 
 
 # %% custom settings
@@ -1103,84 +1104,103 @@ def combine_galaxy_table_metadata(phases):
                   format='ascii.fast_csv', overwrite=True)
 
 
-def baofit_parallel(parameters, model_name, recon_type):
-    '''
-    input parameters are: (beta, r_rescale_factor)
-    '''
-    from baofit import baofit
-    polydeg = '3'  # optimise parameters for each choice of polynomial degree
-    rmin = 50
-    beta = parameters[0]
-    r_rescale_factor = parameters[1]
-    indir = os.path.join(save_dir,
-                         '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
-                         'z{}'.format(redshift))
-    outdir = os.path.join(save_dir,
-                          '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.4f}'
-                          .format(polydeg, rmin, beta, r_rescale_factor))
-    list_of_inputs = []
-    xi_type = recon_type + '-15.0_hmpc'
-    alpha = {}
-    alpha['mat'] = {'r': np.zeros(len(phases)),
-                    't': np.zeros(len(phases))}
-    for phase in phases:  # list of inputs for parallelisation
-        sim_name = '{}_{:02}-{}'.format(
-                sim_name_prefix, cosmology, phase)
-        path_p_lin = os.path.join(
-            prod_dir, sim_name+'_products', sim_name+'_power', 'info',
-            'camb_matterpower.dat')
-        path_xi_0 = os.path.join(
-            indir,
-            '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
-            .format(model_name, xi_type, phase))
-        path_xi_2 = os.path.join(
-            indir,
-            '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
-            .format(model_name, xi_type, phase))
-        if 'pre-recon' in xi_type:
-            recon = False
-            path_cov = os.path.join(
+class FitterCache:
+
+    def __init__(self, parameters, model_name, recon_type):
+        '''
+        input parameters are: (beta, r_rescale_factor)
+        '''
+
+        self.polydeg = '3'  # optimise parameters for each polynomial degree
+        self.rmin = 50
+        self.model_name = model_name
+        self.recon_type = recon_type
+        self.results = {}  # initialise lookup dict results[beta][r_fac]
+        self.baofit_parallel(parameters)
+
+    def baofit_parallel(self, parameters):
+
+        beta = np.around(parameters[0], decimals=2)
+        r_rescale_factor = np.around(parameters[1], decimals=4)
+        if beta in self.results.keys():
+            if r_rescale_factor in self.results[beta].keys():
+                print('Returning cached alpha results to optimiser...')
+                return self.results[beta][r_rescale_factor]
+        indir = os.path.join(
+            save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
+            'z{}'.format(redshift))
+        outdir = os.path.join(
+            save_dir,
+            '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.4f}'
+            .format(self.polydeg, self.rmin, beta, r_rescale_factor))
+        list_of_inputs = []
+        xi_type = self.recon_type + '-15.0_hmpc'
+        alpha = {}
+        alpha['mat'] = {'r': np.zeros(len(phases)),
+                        't': np.zeros(len(phases))}
+        for phase in phases:  # list of inputs for parallelisation
+            sim_name = '{}_{:02}-{}'.format(
+                    sim_name_prefix, cosmology, phase)
+            path_p_lin = os.path.join(
+                prod_dir, sim_name+'_products', sim_name+'_power', 'info',
+                'camb_matterpower.dat')
+            path_xi_0 = os.path.join(
                 indir,
-                '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
-                .format(model_name))
-        elif 'post-recon' in xi_type:
-            recon = True
-            path_cov = os.path.join(
+                '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
+                .format(self.model_name, xi_type, phase))
+            path_xi_2 = os.path.join(
                 indir,
-                '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
-                .format(model_name))
-        fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
-        path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
-        path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
-        list_of_inputs.append(
-            [redshift, recon, polydeg, rmin, beta, r_rescale_factor,
-             path_p_lin, path_xi_0, path_xi_2, path_cov,
-             path_cg, path_ct])
-        path_matter = os.path.join(
-            store_dir, sim_name_prefix+'-mmatter', '2Dbaofits_poly3_rmin_50',
-            'matter-{}-{}-chisq_table.txt'.format(phase, xi_type))
-        chisq_table = np.loadtxt(path_matter)
-        ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
-        alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
-    with closing(MyPool(processes=len(list_of_inputs),
-                        maxtasksperchild=1)) as p:
-        results = p.map(baofit, list_of_inputs)
-    p.close()
-    p.join()
-    # subtract real-space matter field values and return difference
-    alpha['gal'] = {'r': np.array([result[0] for result in results]),
-                    't': np.array([result[1] for result in results])}
-    delta_ar = alpha['gal']['r'] - 1  # alpha['mat']['r']
-    delta_at = alpha['gal']['t'] - 1  # alpha['mat']['t']
-    return np.mean(np.sqrt(np.square(delta_ar) + np.square(delta_at)))
+                '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
+                .format(self.model_name, xi_type, phase))
+            if 'pre-recon' in xi_type:
+                recon = False
+                path_cov = os.path.join(
+                    indir,
+                    '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
+                    .format(self.model_name))
+            elif 'post-recon' in xi_type:
+                recon = True
+                path_cov = os.path.join(
+                    indir,
+                    '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
+                    .format(self.model_name))
+            fout_tag = '{}-{}-{}'.format(self.model_name, phase, xi_type)
+            path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
+            path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
+            list_of_inputs.append(
+                [redshift, recon, self.polydeg, self.rmin, beta,
+                 r_rescale_factor, path_p_lin, path_xi_0, path_xi_2, path_cov,
+                 path_cg, path_ct])
+            path_matter = os.path.join(
+                store_dir, sim_name_prefix+'-mmatter',
+                '2Dbaofits_poly3_rmin_50',
+                'matter-{}-{}-chisq_table.txt'.format(phase, xi_type))
+            chisq_table = np.loadtxt(path_matter)
+            ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
+            alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
+        with closing(MyPool(processes=len(list_of_inputs),
+                            maxtasksperchild=1)) as p:
+            results = p.map(baofit, list_of_inputs)
+        p.close()
+        p.join()
+        # subtract real-space matter field values and return difference
+        alpha['gal'] = {'r': np.array([result[0] for result in results]),
+                        't': np.array([result[1] for result in results])}
+        delta_ar = alpha['gal']['r'] - 1  # alpha['mat']['r']
+        delta_at = alpha['gal']['t'] - 1  # alpha['mat']['t']
+        self.results[beta] = {
+            r_rescale_factor:
+            np.mean(np.sqrt(np.square(delta_ar) + np.square(delta_at)))}
+        return self.results[beta][r_rescale_factor]
 
 
 def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std'):
 
-    solution = minimize(baofit_parallel, (0.01, 1.001),
-                        args=(model_name, recon_type),
-                        bounds=((-0.0001, 0.2), (1, 1.004)), method='SLSQP',
-                        options={'ftol': 1e-07, 'eps': 0.001, 'maxiter': 40})
+    cache = FitterCache((0, 1.002), model_name, recon_type)
+    solution = minimize(
+        cache.baofit_parallel, (0, 1.002),
+        bounds=((-0.001, 0.055), (1, 1.0035)), method='SLSQP',
+        options={'ftol': 2e-05, 'eps': 1e-3, 'maxiter': 15, 'disp': True})
     if solution.success:
         print('Best parameters: ', solution.x)
     else:
@@ -1242,4 +1262,5 @@ if __name__ == "__main__":
         optimise_fitter(model_name='gen_base1', recon_type='post-recon-std')
     if do_fit:
         for model_name in model_names:
-            baofit_parallel((0, 1.000), model_name=model_name)
+            cache = FitterCache((0, 1.002), model_name, 'post-recon-std')
+            cache.baofit_parallel((0, 1.000), model_name=model_name)

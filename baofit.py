@@ -185,7 +185,7 @@ class baofit3D:
         ats = np.arange(atmin, atmax, atsp)
         chisq_grid = np.zeros((ars.size, ats.size))
         chisq_list = []
-        print('Chi-square grid scan size', chisq_grid.size)
+        print('\nChi-square grid scan size', chisq_grid.size)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
             self.ar = ars[i]
             self.at = ats[j]
