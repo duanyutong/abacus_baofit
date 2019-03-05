@@ -16,6 +16,7 @@ import subprocess
 import traceback
 import numpy as np
 import numpy.lib.recfunctions as rfn
+from scipy.optimize import minimize
 from astropy import table
 from halotools.mock_observables import tpcf_multipole
 from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
@@ -34,22 +35,25 @@ from Abacus import Halotools as abacus_ht  # Abacus
 
 
 # %% custom settings
-sim_name_prefix = 'AbacusCosmos_1100box_planck'
-tagout = 'mmatter'
-phases = range(20)
-#sim_name_prefix = 'emulator_1100box_planck'
-#tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
-#phases = range(16)  # range(16)  # [0, 1] # list(range(16))
-model_names = ['gen_base1', 'gen_base6', 'gen_base7',
-               'gen_ass1',  'gen_ass1_n',
-               'gen_ass2',  'gen_ass2_n',
-               'gen_vel2',  'gen_vel1',
-               'gen_s1',    'gen_s1_n',
-               'gen_sv1',   'gen_sv1_n',
-               'gen_sp1',   'gen_sp1_n']
-model_names = ['matter']
-reals = range(1)  # range(12)
+#sim_name_prefix = 'AbacusCosmos_1100box_planck'
+#tagout = 'mmatter'
+#phases = range(20)
+sim_name_prefix = 'emulator_1100box_planck'
+tagout = 'norsd'  # 'norsd'  # '# 'matter'  # 'z0.5'
+phases = range(16)  # range(16)  # [0, 1] # list(range(16))
+#model_names = ['gen_base1', 'gen_base6', 'gen_base7',
+#               'gen_ass1',  'gen_ass1_n',
+#               'gen_ass2',  'gen_ass2_n',
+#               'gen_vel2',  'gen_vel1',
+#               'gen_s1',    'gen_s1_n',
+#               'gen_sv1',   'gen_sv1_n',
+#               'gen_sp1',   'gen_sp1_n']
+model_names = ['gen_base1']
+reals = range(12)  # range(12)
 N_threads = 24  # number of threads for a single realisation
+do_create = False
+do_optimise_fitter = True
+do_fit = False
 
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -895,9 +899,9 @@ def coadd_realisations(model_name, phase, reals):
 #        'fftcorr_R-pre-recon-15.0_hmpc',
         'fftcorr_N-post-recon-std-15.0_hmpc',
         'fftcorr_R-post-recon-std-15.0_hmpc'
-#                     'fftcorr_N-post-recon-ite-15.0_hmpc',
-#                     'fftcorr_R-post-recon-ite-15.0_hmpc']
-                     ]
+#        'fftcorr_N-post-recon-ite-15.0_hmpc',
+#        'fftcorr_R-post-recon-ite-15.0_hmpc']
+    ]
     try:
         # Co-add auto-correlation results from all realisations
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -1099,112 +1103,143 @@ def combine_galaxy_table_metadata(phases):
                   format='ascii.fast_csv', overwrite=True)
 
 
-def run_baofit_parallel(baofit_phases):
-
+def baofit_parallel(parameters, model_name, recon_type):
+    '''
+    input parameters are: (beta, r_rescale_factor)
+    '''
     from baofit import baofit
-    # from baofit_lwv import baofit as baofit_lwv
-    polydeg = '3'
+    polydeg = '3'  # optimise parameters for each choice of polynomial degree
     rmin = 50
+    beta = parameters[0]
+    r_rescale_factor = parameters[1]
     indir = os.path.join(save_dir,
                          '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
                          'z{}'.format(redshift))
     outdir = os.path.join(save_dir,
-                          '2Dbaofits_poly{}_rmin_{}'.format(polydeg, rmin))
+                          '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.4f}'
+                          .format(polydeg, rmin, beta, r_rescale_factor))
     list_of_inputs = []
-    # list_lwv = []
-    for model_name in model_names:
-        for i in range(int(len(coadd_filenames)/2)):  # debug
-            xi_type = coadd_filenames[fft+2*i][19:]
-            for phase in baofit_phases:  # list of inputs for parallelisation
-                sim_name = '{}_{:02}-{}'.format(
-                        sim_name_prefix, cosmology, phase)
-                path_p_lin = os.path.join(
-                    prod_dir, sim_name+'_products', sim_name+'_power', 'info',
-                    'camb_matterpower.dat')
-                path_xi_0 = os.path.join(
-                    indir,
-                    '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, xi_type, phase))
-                path_xi_2 = os.path.join(
-                    indir,
-                    '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
-                    .format(model_name, xi_type, phase))
-                if 'pre-recon' in xi_type:
-                    recon = False
-                    path_cov = os.path.join(
-                        indir,
-                        '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
-                        .format(model_name))
-                elif 'post-recon' in xi_type:
-                    recon = True
-                    path_cov = os.path.join(
-                        indir,
-                        '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
-                        .format(model_name))
-                fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
-                path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
-                path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
-                list_of_inputs.append(
-                    [redshift, path_p_lin, path_xi_0, path_xi_2, path_cov,
-                     '3', rmin, path_cg, path_ct, recon, (not use_rsd)])
-                # list_lwv.append([path_xi_0, path_xi_2, path_cov, fout_tag,
-                #                  '3', rmin])
-    with closing(MyPool(processes=len(phases),
+    xi_type = recon_type + '-15.0_hmpc'
+    alpha = {}
+    alpha['mat'] = {'r': np.zeros(len(phases)),
+                    't': np.zeros(len(phases))}
+    for phase in phases:  # list of inputs for parallelisation
+        sim_name = '{}_{:02}-{}'.format(
+                sim_name_prefix, cosmology, phase)
+        path_p_lin = os.path.join(
+            prod_dir, sim_name+'_products', sim_name+'_power', 'info',
+            'camb_matterpower.dat')
+        path_xi_0 = os.path.join(
+            indir,
+            '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
+            .format(model_name, xi_type, phase))
+        path_xi_2 = os.path.join(
+            indir,
+            '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
+            .format(model_name, xi_type, phase))
+        if 'pre-recon' in xi_type:
+            recon = False
+            path_cov = os.path.join(
+                indir,
+                '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
+                .format(model_name))
+        elif 'post-recon' in xi_type:
+            recon = True
+            path_cov = os.path.join(
+                indir,
+                '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
+                .format(model_name))
+        fout_tag = '{}-{}-{}'.format(model_name, phase, xi_type)
+        path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
+        path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
+        list_of_inputs.append(
+            [redshift, recon, polydeg, rmin, beta, r_rescale_factor,
+             path_p_lin, path_xi_0, path_xi_2, path_cov,
+             path_cg, path_ct])
+        path_matter = os.path.join(
+            store_dir, sim_name_prefix+'-mmatter', '2Dbaofits_poly3_rmin_50',
+            'matter-{}-{}-chisq_table.txt'.format(phase, xi_type))
+        chisq_table = np.loadtxt(path_matter)
+        ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
+        alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
+    with closing(MyPool(processes=len(list_of_inputs),
                         maxtasksperchild=1)) as p:
-        p.map(baofit, list_of_inputs)
+        results = p.map(baofit, list_of_inputs)
     p.close()
     p.join()
+    # subtract real-space matter field values and return difference
+    alpha['gal'] = {'r': np.array([result[0] for result in results]),
+                    't': np.array([result[1] for result in results])}
+    delta_ar = alpha['gal']['r'] - 1  # alpha['mat']['r']
+    delta_at = alpha['gal']['t'] - 1  # alpha['mat']['t']
+    return np.mean(np.sqrt(np.square(delta_ar) + np.square(delta_at)))
+
+
+def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std'):
+
+    solution = minimize(baofit_parallel, (0.01, 1.001),
+                        args=(model_name, recon_type),
+                        bounds=((-0.0001, 0.2), (1, 1.004)), method='SLSQP',
+                        options={'ftol': 1e-07, 'eps': 0.001, 'maxiter': 40})
+    if solution.success:
+        print('Best parameters: ', solution.x)
+    else:
+        print('fitter optimiser failed', solution.message)
 
 
 if __name__ == "__main__":
-
-    fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
-                 phases=phases)
-    for phase in phases:
-        global halocat
-        if 'matter' in model_names:
-            halocat = make_halocat(phase, halo_type='FoF')
-            print('\nSkipping halocat processing, analysing matter field...')
-        else:
-            halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
-        for model_name in model_names:
-            print('---\nWorking on {} realisations, phase {}, model {}...'
-                  .format(len(reals), phase, model_name))
-            with closing(MyPool(processes=int(np.ceil(len(reals)/2)),
+    if do_create:
+        fit_c_median(sim_name_prefix, prod_dir, store_dir, redshift, cosmology,
+                     phases=phases)
+        for phase in phases:
+            global halocat
+            if 'matter' in model_names:
+                halocat = make_halocat(phase, halo_type='FoF')
+                print('\nSkipping halocat processing, matter field...')
+            else:
+                halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
+            for model_name in model_names:
+                print('---\nWorking on {} realisations, phase {}, model {}...'
+                      .format(len(reals), phase, model_name))
+                with closing(MyPool(processes=int(np.ceil(len(reals)/2)),
+                                    maxtasksperchild=1)) as p:
+                    p.map(partial(do_galaxy_table,
+                                  phase=phase, model_name=model_name,
+                                  overwrite=False),
+                          reals)
+                    p.close()
+                    p.join()
+                with closing(MyPool(processes=N_concurrent_reals,
+                                    maxtasksperchild=1)) as p:
+                    p.map(partial(
+                            do_realisation, phase=phase, model_name=model_name,
+                            overwrite=True,
+                            do_pre_auto_smu=False, do_pre_auto_rppi=False,
+                            do_pre_auto_fft=False, do_pre_cross=False,
+                            do_recon_std=True, do_post_auto_rppi=False,
+                            do_post_cross=True, do_recon_ite=False,
+                            do_pre_auto_corr=False, do_post_auto_corr=False,
+                            do_pre_cross_corr=False, do_post_cross_corr=True),
+                          reals)
+                    p.close()
+                    p.join()
+                print('---\nPool closed cleanly for model {}.\n---'
+                      .format(model_name))
+            with closing(MyPool(processes=len(model_names),
                                 maxtasksperchild=1)) as p:
-                p.map(partial(do_galaxy_table,
-                              phase=phase, model_name=model_name,
-                              overwrite=False),
-                      reals)
+                p.map(partial(coadd_realisations, phase=phase, reals=reals),
+                      model_names)
                 p.close()
                 p.join()
-            with closing(MyPool(processes=N_concurrent_reals,
-                                maxtasksperchild=1)) as p:
-                p.map(partial(
-                        do_realisation, phase=phase, model_name=model_name,
-                        overwrite=True,
-                        do_pre_auto_smu=False, do_pre_auto_rppi=False,
-                        do_pre_auto_fft=False, do_pre_cross=False,
-                        do_recon_std=True, do_post_auto_rppi=False,
-                        do_post_cross=True, do_recon_ite=False,
-                        do_pre_auto_corr=False, do_post_auto_corr=False,
-                        do_pre_cross_corr=False, do_post_cross_corr=True),
-                      reals)
-                p.close()
-                p.join()
-            print('---\nPool closed cleanly for model {}.\n---'
-                  .format(model_name))
-        with closing(MyPool(processes=len(model_names),  # len(model_names),
+        # combine_galaxy_table_metadata(phases)
+        with closing(MyPool(processes=len(model_names),
                             maxtasksperchild=1)) as p:
-            p.map(partial(coadd_realisations, phase=phase, reals=reals),
-                  model_names)
+            p.map(coadd_phases, model_names)
+            p.map(do_cov, model_names)
             p.close()
             p.join()
-    combine_galaxy_table_metadata(phases)
-    with closing(MyPool(processes=len(model_names),
-                        maxtasksperchild=1)) as p:
-        p.map(coadd_phases, model_names)
-        p.map(do_cov, model_names)
-        p.close()
-        p.join()
-    run_baofit_parallel(baofit_phases=phases)
+    if do_optimise_fitter:
+        optimise_fitter(model_name='gen_base1', recon_type='post-recon-std')
+    if do_fit:
+        for model_name in model_names:
+            baofit_parallel((0, 1.000), model_name=model_name)

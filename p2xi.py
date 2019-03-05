@@ -26,14 +26,13 @@ def W(kR):
 
 class PowerTemplate:
 
-    def __init__(self, reconstructed=True, force_isotropy=False, z=0.5,
+    def __init__(self, reconstructed=True, z=0.5,
                  ombhsq=0.02222, omhsq=0.14212,
                  sigma8=0.830, h=0.6726, ns=0.9652, Tcmb0=2.725):
         # print('Power Temp is isotropic: ', isotropic)
         self.z = z
         self.h = h
         self.reconstructed = reconstructed
-        self.force_isotropy = force_isotropy
         self.ombhsq = ombhsq  # Omega matter baryon
         self.omhsq = omhsq  # Omega matter (baryon + CDM)
         self.om = omhsq/np.square(h)
@@ -47,8 +46,6 @@ class PowerTemplate:
         self.Rscale = 8
         self.P0smooth = 1  # initial value for the coefficient
         self.P0smooth = np.square(sigma8/self.siglogsmooth())  # correction
-        # omega=0.3,lamda=0.7,h=0.7,h0=1.,ombhh=0.0224,CMBtemp=2.725,sig8=.8,
-        # c=2997,hmode=0,sbao=8.,nindex=.95
 
     def T0(self, k):
         '''
@@ -108,7 +105,7 @@ class PowerTemplate:
             np.power(k, self.ns) * np.square(Dlin_ratio)
         return Psmooth
 
-    def P(self, k_lin, P_lin, n_mu_bins, beta=0.4, Sigma_s=4):
+    def P(self, k_lin, P_lin, n_mu_bins, beta=0.4):
         """
         This is the final power template from P_lin and P_nw
         including the C and exponential damping terms
@@ -127,17 +124,15 @@ class PowerTemplate:
             assert P_lin.size == P_nw.size
         except AssertionError:
             print('P shapes are', P_lin.shape, P_nw.shape)
+        Sigma_s = 4  # Mpc/h
         Sigma_r = 15  # Mpc/h
         if self.reconstructed:
             Sigma_perp = 2.5  # Mpc/h
-            Sigma_para = 4  # Mpc/h
+            # Sigma_para = 4  # Mpc/h
         else:
             Sigma_perp = 6  # Mpc/h
-            Sigma_para = 10  # Mpc/h
-        if self.force_isotropy:
-            Sigma_perp = Sigma_para = np.mean([Sigma_perp, Sigma_para])
-            beta = 0
-            print('Forcing beta = 0')
+            # Sigma_para = 10  # Mpc/h
+        Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
         sigmavsq = (1 - np.square(mu))*np.square(Sigma_perp)/2 \
             + np.square(mu*Sigma_para)/2
         S = np.exp(-np.square(k*Sigma_r)/2)

@@ -26,7 +26,6 @@ n_mu_bins = 1000
 chisq_min = 1500
 r_avg_increment = 1
 txtfmt = b'%.30e'
-r_rescale_factor = 1.002
 
 
 def matmul(*args):
@@ -35,14 +34,12 @@ def matmul(*args):
 
 class baofit3D:
 
-    def __init__(self, k, P_lin, r, xi_0, xi_2, cov, polydeg,
-                 reconstructed, force_isotropy,
-                 z=0.5, r_min=50, r_max=150,
+    def __init__(self, z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta,
+                 reconstructed, r_min=50, r_max=150,
                  xi_temp_weighted=False, xi_temp_rescale=1):
 
-        power = PowerTemplate(z=z, reconstructed=reconstructed,
-                              force_isotropy=force_isotropy)
-        power.P(k, P_lin, n_mu_bins)
+        power = PowerTemplate(z=z, reconstructed=reconstructed)
+        power.P(k, P_lin, n_mu_bins, beta=beta)
         self.xi_multipole = {}
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
@@ -57,10 +54,9 @@ class baofit3D:
         self.rv = np.hstack([self.r, self.r])  # * 1.000396  # debug
         self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
         self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
-        print(('Reconstructed: {}, force isotropy: {}, '
-               'xi template rescale factor: {}, shape of data vector: {}')
-              .format(reconstructed, force_isotropy,
-                      xi_temp_rescale, self.dv.shape))
+        print(('\nReconstructed: {}, '
+               'xi template rescale factor: {:.2f}, shape of data vector: {}')
+              .format(reconstructed, xi_temp_rescale, self.dv.shape))
         ri_mask = np.tile(r_mask, (len(r_mask), 1)).T
         rj_mask = np.tile(r_mask, (len(r_mask), 1))
         quadrant_mask = ri_mask & rj_mask
@@ -124,15 +120,15 @@ class baofit3D:
         assert self.r.size == xi.size
         return xi
 
-    def make_xi_temp(self, weighted=True):
+    def make_xi_temp(self):
         ''' xi_0, xi_2, xi_mu_2 over r bin, weighted by r^2 integral '''
         if not hasattr(self, 'xitemp'):
             self.xitemp = {}
         n = np.int(np.floor(np.mean(np.diff(self.r))/r_avg_increment)//2*2+1)
         for comp in ['0', '2', 'mu2']:
-            if weighted:
-                # print('Making weighted xi {} tempplate across bin width...'
-                #       .format(comp))
+            if self.xi_temp_weighted:
+                # print('Making {}-weighted xi {} template across bin width...'
+                #       .format(n, comp))
                 array = np.zeros((self.r.size, 2, n))
                 for i in range(n):
                     r = self.r - (n-1)/2*r_avg_increment + i*r_avg_increment
@@ -169,7 +165,6 @@ class baofit3D:
         return factor * (chisq + B0_term + B2_term)
 
     def B0_B2_optimize(self, Bs):
-
         B0, B2 = Bs
         self.A = np.zeros(6)  # assume zero A before taking diff solving for A
         self.make_model_vector(B0=B0, B2=B2)  # get model vector with 0 A
@@ -179,38 +174,42 @@ class baofit3D:
         self.make_model_vector(B0=B0, B2=B2)  # now make new mv with A hat
         return self.calculate_chisq(B0, B2)
 
-    def do_fit(self,
-               armin=0.910, armax=1.040, arsp=0.005,
-               atmin=0.990, atmax=1.040, atsp=0.005):
+    def chisq_scan(self,
+                   armin=0.995, armax=1.008, arsp=0.0006,
+                   atmin=0.996, atmax=1.004, atsp=0.0006):
         '''
-        armin=0.975, armax=1.035, arsp=0.0004
-        atmin=1.000, atmax=1.040, atsp=0.0004
+        armin=0.988, armax=1.012, arsp=0.0006
+        atmin=0.989, atmax=1.011, atsp=0.0006
         '''
         ars = np.arange(armin, armax, arsp)
         ats = np.arange(atmin, atmax, atsp)
         chisq_grid = np.zeros((ars.size, ats.size))
         chisq_list = []
+        print('Chi-square grid scan size', chisq_grid.size)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
             self.ar = ars[i]
             self.at = ats[j]
-            self.make_xi_temp(weighted=self.xi_temp_weighted)
-            B0, B2 = minimize(self.B0_B2_optimize, (1, 1),
-                              bounds=((0.1, 2), (0.1, 2)), method='SLSQP').x
-            chisq_min = self.B0_B2_optimize((B0, B2))
-            chisq_grid[i, j] = chisq_min
-            chisq_list.append([ars[i], ats[j], chisq_min])
-            # print('Grid {}/{}, ({}, {}), {}'.format(
-            #         i*ats.size+j+1, chisq_grid.size,
-            #         ars[i], ats[j], chisq_min))
+            self.make_xi_temp()
+            solution = minimize(self.B0_B2_optimize, (1, 1),
+                                bounds=((0.1, 2), (0.1, 2)), method='SLSQP')
+            # B0, B2 = solution.x
+            # chisq_min = self.B0_B2_optimize((B0, B2))
+            chisq_grid[i, j] = solution.fun
+            chisq_list.append([ars[i], ats[j], solution.fun])
             # print('B0, B2, A:', B0, B2, self.A)
         return chisq_grid, np.array(chisq_list)
 
 
 def baofit(argv):
     try:
-        z, path_p_lin, path_xi_0, path_xi_2, path_cov, polydeg, rmin, \
-            path_chisq_grid, path_chisq_table, recon, iso = argv
-        print('Saving chisq to:', os.path.dirname(path_chisq_grid))
+        z, recon, polydeg, rmin, beta, r_rescale_factor, path_p_lin, \
+            path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
+        print('Saving chisq results to:', os.path.dirname(path_cg))
+        if not os.path.exists(os.path.dirname(path_cg)):
+            try:
+                os.mkdir(os.path.dirname(path_cg))
+            except FileExistsError:
+                pass
         data = np.loadtxt(path_p_lin)
         k = data[:, 0]
         P_lin = data[:, 1]
@@ -231,15 +230,17 @@ def baofit(argv):
             print('NaN values in cov at: ', np.where(cov == np.nan))
             raise Exception
         # find best B_0 from bias prior, reduced range
-        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
-                       z=z, r_min=rmin, r_max=80, xi_temp_weighted=True)
-        fit.make_xi_temp(weighted=fit.xi_temp_weighted)
+        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
+                       r_min=rmin, r_max=150,
+                       xi_temp_weighted=False, xi_temp_rescale=1)
+        fit.make_xi_temp()
         # determine best-fit rescaling factor and target bias using xi_0
         xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
             fit.xitemp['0'].T, fit.xitemp['0'])
-        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
-                       z=z, r_min=rmin, r_max=80,
-                       xi_temp_weighted=True, xi_temp_rescale=xi_temp_rescale)
+        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
+                       r_min=rmin, r_max=80,
+                       xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
+        fit.make_xi_temp()
         B0_list = np.arange(0.1, 2, 0.01)
         chisq = np.zeros(B0_list.shape)
         for i, B0 in enumerate(B0_list):
@@ -249,26 +250,20 @@ def baofit(argv):
         assert np.any(chisq < chisq_min) is np.True_, \
             ('B0 = {} at lowest chisq = {} > chisq_min,'
              .format(B0_list[np.argmin(chisq)], chisq.min()))
-        # print('\nBest-fit prior B0 {}, chisq_min {}'
-        #       .format(B0[np.argmin(chisq)], np.min(chisq)))
         # update prior and do chisq grid scan, full range
-        fit = baofit3D(k, P_lin, r, xi_0, xi_2, cov, polydeg, recon, iso,
-                       z=z, r_min=rmin, r_max=150,
+        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
+                       r_min=rmin, r_max=150,
                        xi_temp_weighted=True, xi_temp_rescale=xi_temp_rescale)
         fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit.B0_ln_width = 0.4
         fit.B2_ln_width = 0.4
-        chisq_grid, chisq_table = fit.do_fit(
-            armin=0.988, armax=1.012, arsp=0.0003,
-            atmin=0.989, atmax=1.011, atsp=0.0003
-            )
-        if not os.path.exists(os.path.dirname(path_chisq_grid)):
-            os.mkdir(os.path.dirname(path_chisq_grid))
-        np.savetxt(path_chisq_grid, chisq_grid, fmt=txtfmt)
-        np.savetxt(path_chisq_table, chisq_table, fmt=txtfmt)
+        chisq_grid, chisq_table = fit.chisq_scan()
+        np.savetxt(path_cg, chisq_grid, fmt=txtfmt)
+        np.savetxt(path_ct, chisq_table, fmt=txtfmt)
         ar, at, chisq = chisq_table[np.argmin(chisq_table[:, 2]), :]
         print('\nBest-fit ar, at, chisq: ({}, {}), {}'
               .format(ar, at, chisq))
+        return ar, at
     except Exception as E:
         print('Exception caught in worker thread {}'.format(path_xi_0))
         traceback.print_exc()
