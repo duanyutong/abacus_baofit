@@ -124,17 +124,17 @@ class PowerTemplate:
             assert P_lin.size == P_nw.size
         except AssertionError:
             print('P shapes are', P_lin.shape, P_nw.shape)
-        Sigma_s = 4  # Mpc/h
-        Sigma_r = 15  # Mpc/h
+        Sigma_s = 4  # 4 Mpc/h
+        Sigma_r = 15  # 15 Mpc/h
         if self.reconstructed:
-            Sigma_perp = 2.5  # Mpc/h
+            Sigma_perp = 0.1  # 2.5 Mpc/h, the smaller, the sharper BAO peak
             # Sigma_para = 4  # Mpc/h
         else:
-            Sigma_perp = 6  # Mpc/h
+            Sigma_perp = 6  # 6 Mpc/h
             # Sigma_para = 10  # Mpc/h
         Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
         sigmavsq = (1 - np.square(mu))*np.square(Sigma_perp)/2 \
-            + np.square(mu*Sigma_para)/2
+            + np.square(mu*Sigma_para)/2  # BAO peak smoothing due to nonlinear
         S = np.exp(-np.square(k*Sigma_r)/2)
         C = (1 + np.square(mu) * beta * (1-S)) / \
             (1 + np.square(k*mu*Sigma_s)/2)

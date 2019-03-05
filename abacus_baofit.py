@@ -1106,7 +1106,7 @@ def combine_galaxy_table_metadata(phases):
 
 class FitterCache:
 
-    def __init__(self, parameters, model_name, recon_type):
+    def __init__(self, beta, r_rescale_factor, model_name, recon_type):
         '''
         input parameters are: (beta, r_rescale_factor)
         '''
@@ -1116,15 +1116,21 @@ class FitterCache:
         self.model_name = model_name
         self.recon_type = recon_type
         self.results = {}  # initialise lookup dict results[beta][r_fac]
-        self.baofit_parallel(parameters)
+        self.baofit_parallel((beta/10, r_rescale_factor))  # pass beta prime
 
     def baofit_parallel(self, parameters):
-
-        beta = np.around(parameters[0], decimals=2)
+        # input beta prime in [0, 0.04] in 0.001 steps, beta in [0, 0.4]
+        beta_prime = np.around(parameters[0], decimals=3)
+        beta = beta_prime * 10
         r_rescale_factor = np.around(parameters[1], decimals=4)
+        if np.isnan(beta) or np.isnan(r_rescale_factor):
+            print('NaN parameters encountered, returning NaN...')
+            return np.nan
         if beta in self.results.keys():
             if r_rescale_factor in self.results[beta].keys():
-                print('Returning cached alpha results to optimiser...')
+                print('Returning cached result to optimiser: {}, {}, {}'
+                      .format(beta, r_rescale_factor,
+                              self.results[beta][r_rescale_factor]))
                 return self.results[beta][r_rescale_factor]
         indir = os.path.join(
             save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
@@ -1180,31 +1186,35 @@ class FitterCache:
             alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
         with closing(MyPool(processes=len(list_of_inputs),
                             maxtasksperchild=1)) as p:
-            results = p.map(baofit, list_of_inputs)
+            ret = p.map(baofit, list_of_inputs)
         p.close()
         p.join()
         # subtract real-space matter field values and return difference
-        alpha['gal'] = {'r': np.array([result[0] for result in results]),
-                        't': np.array([result[1] for result in results])}
-        delta_ar = alpha['gal']['r'] - 1  # alpha['mat']['r']
-        delta_at = alpha['gal']['t'] - 1  # alpha['mat']['t']
-        self.results[beta] = {
-            r_rescale_factor:
-            np.mean(np.sqrt(np.square(delta_ar) + np.square(delta_at)))}
-        return self.results[beta][r_rescale_factor]
+        alpha['gal'] = {'r': np.array([item[0] for item in ret]),
+                        't': np.array([item[1] for item in ret])}
+        aiso = np.power(alpha['gal']['r'], 1/3) \
+            + np.power(alpha['gal']['t'], 2/3)
+        if beta not in self.results.keys():
+            self.results[beta] = {}
+        result = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso-1)
+        print('Returning new result to optimiser: {}, {}, {}'
+              .format(beta, r_rescale_factor, result))
+        return result
 
 
 def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std'):
 
-    cache = FitterCache((0, 1.002), model_name, recon_type)
-    solution = minimize(
+    cache = FitterCache(0, 1.002, model_name, recon_type)
+    ret = minimize(
         cache.baofit_parallel, (0, 1.002),
-        bounds=((-0.001, 0.055), (1, 1.0035)), method='SLSQP',
-        options={'ftol': 2e-05, 'eps': 1e-3, 'maxiter': 15, 'disp': True})
-    if solution.success:
-        print('Best parameters: ', solution.x)
+        bounds=((-0.0001, 0.006), (1, 1.0035)), method='SLSQP',
+        options={'ftol': 3e-05, 'eps': 1e-3, 'maxiter': 4, 'disp': True})
+    print('Results:', cache.results)
+    if ret.success:
+        print('Best parameters: beta = {}, r_rescale_factor = {})'
+              .format(ret.x[0]*10, ret.x[1]))
     else:
-        print('fitter optimiser failed', solution.message)
+        print('fitter optimiser failed', ret.message)
 
 
 if __name__ == "__main__":
@@ -1262,5 +1272,4 @@ if __name__ == "__main__":
         optimise_fitter(model_name='gen_base1', recon_type='post-recon-std')
     if do_fit:
         for model_name in model_names:
-            cache = FitterCache((0, 1.002), model_name, 'post-recon-std')
-            cache.baofit_parallel((0, 1.000), model_name=model_name)
+            cache = FitterCache(0, 1.002, model_name, 'post-recon-std')

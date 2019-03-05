@@ -51,6 +51,7 @@ class baofit3D:
         # slightly larger average pair distance than the bin center
         r_mask = (r_min < r) & (r < r_max)
         self.r = r[r_mask]
+        self.rfull = np.arange(1, 151)
         self.rv = np.hstack([self.r, self.r])  # * 1.000396  # debug
         self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
         self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
@@ -117,40 +118,43 @@ class baofit3D:
                     self.xi_r_mu(rp, mup)*(Ln(-mup)+Ln(mup))*dmu, axis=1)
         elif component == 'mu2':
             xi = np.sum(3/2*np.square(mup)*self.xi_r_mu(rp, mup)*dmu, axis=1)
-        assert self.r.size == xi.size
+        assert r.size == xi.size
         return xi
 
-    def make_xi_temp(self):
+    def make_xi_temp(self, r0=None):
         ''' xi_0, xi_2, xi_mu_2 over r bin, weighted by r^2 integral '''
-        if not hasattr(self, 'xitemp'):
-            self.xitemp = {}
-        n = np.int(np.floor(np.mean(np.diff(self.r))/r_avg_increment)//2*2+1)
+        if r0 is None:
+            r0 = self.r
+        n = np.int(np.floor(np.mean(np.diff(r0))/r_avg_increment)//2*2+1)
+        ret = {}
         for comp in ['0', '2', 'mu2']:
             if self.xi_temp_weighted:
                 # print('Making {}-weighted xi {} template across bin width...'
                 #       .format(n, comp))
-                array = np.zeros((self.r.size, 2, n))
+                array = np.zeros((r0.size, 2, n))
                 for i in range(n):
-                    r = self.r - (n-1)/2*r_avg_increment + i*r_avg_increment
+                    r = r0 - (n-1)/2*r_avg_increment + i*r_avg_increment
                     # print('r bin {} of {}, r = {}'.format(i, n, r))
                     array[:, 0, i] = r
                     array[:, 1, i] = self.xi_temp_components(r, component=comp)
-                self.xitemp[comp] = np.sum(
+                ret[comp] = np.sum(
                     np.square(array[:, 0, :])*array[:, 1, :],
                     axis=1) / np.sum(np.square(array[:, 0, :]), axis=1)
             else:
                 # print('Making unweighted xi {} template ...'.format(comp))
-                self.xitemp[comp] = self.xi_temp_components(self.r,
-                                                            component=comp)
+                ret[comp] = self.xi_temp_components(r0, component=comp)
+        return ret
 
-    def make_model_vector(self, B0, B2):
+    def make_model_vector(self, B0, B2, r0=None):
         ''' calculate model vector from templates using B, A coefficients '''
-        self.ximod = {
-            '0': B0*self.xitemp['0']
-            + self.A[0]/np.square(self.r) + self.A[1]/self.r + self.A[2],
-            '2': 5*(B2*self.xitemp['mu2']-B0/2*self.xitemp['0'])
-            + self.A[3]/np.square(self.r) + self.A[4]/self.r + self.A[5]}
-        self.mv = np.hstack([self.ximod['0'], self.ximod['2']])  # model vector
+        if r0 is None:
+            r0 = self.r
+        ximod0 = B0*self.xitemp['0'] \
+            + self.A[0]/np.square(r0) + self.A[1]/r0 + self.A[2]
+        ximod2 = 5*(B2*self.xitemp['mu2']-B0/2*self.xitemp['0']) \
+            + self.A[3]/np.square(r0) + self.A[4]/r0 + self.A[5]
+        self.mv = np.hstack([ximod0, ximod2])  # model vector
+        return ximod0, ximod2
 
     def calculate_chisq(self, B0, B2):
         ''' input Bs is a tuple of two B coefficients '''
@@ -167,16 +171,16 @@ class baofit3D:
     def B0_B2_optimize(self, Bs):
         B0, B2 = Bs
         self.A = np.zeros(6)  # assume zero A before taking diff solving for A
-        self.make_model_vector(B0=B0, B2=B2)  # get model vector with 0 A
+        self.make_model_vector(B0, B2)  # get model vector with 0 A
         self.A = matmul(
                 np.linalg.pinv(matmul(self.H.T, self.icov, self.H)),
                 self.H.T, self.icov, self.dv-self.mv)  # solve for A hat
-        self.make_model_vector(B0=B0, B2=B2)  # now make new mv with A hat
+        self.make_model_vector(B0, B2)  # now make new mv with A hat
         return self.calculate_chisq(B0, B2)
 
     def chisq_scan(self,
-                   armin=0.995, armax=1.008, arsp=0.0006,
-                   atmin=0.996, atmax=1.004, atsp=0.0006):
+                   armin=0.994, armax=1.006, arsp=0.0005,
+                   atmin=0.996, atmax=1.004, atsp=0.0005):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006
@@ -184,20 +188,38 @@ class baofit3D:
         ars = np.arange(armin, armax, arsp)
         ats = np.arange(atmin, atmax, atsp)
         chisq_grid = np.zeros((ars.size, ats.size))
+        B0_grid = np.zeros(chisq_grid.shape)
+        B2_grid = np.zeros(chisq_grid.shape)
         chisq_list = []
         print('\nChi-square grid scan size', chisq_grid.size)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
             self.ar = ars[i]
             self.at = ats[j]
-            self.make_xi_temp()
-            solution = minimize(self.B0_B2_optimize, (1, 1),
-                                bounds=((0.1, 2), (0.1, 2)), method='SLSQP')
+            self.xitemp = self.make_xi_temp()
+            ret = minimize(self.B0_B2_optimize, (1, 1),
+                           bounds=((0.1, 2), (0.1, 2)), method='SLSQP')
             # B0, B2 = solution.x
             # chisq_min = self.B0_B2_optimize((B0, B2))
-            chisq_grid[i, j] = solution.fun
-            chisq_list.append([ars[i], ats[j], solution.fun])
+            chisq_grid[i, j] = ret.fun
+            B0_grid[i, j], B2_grid[i, j] = ret.x[0], ret.x[1]
+            chisq_list.append([ars[i], ats[j], ret.fun])
             # print('B0, B2, A:', B0, B2, self.A)
-        return chisq_grid, np.array(chisq_list)
+        i, j = np.unravel_index(np.argmin(chisq_grid), chisq_grid.shape)
+        chisq_table = np.array(chisq_list)
+        model_dump = self.model_dump(ars[i], ats[j], chisq_grid[i, j],
+                                     B0_grid[i, j], B2_grid[i, j])
+        return chisq_grid, chisq_table, model_dump
+
+    def model_dump(self, ar, at, chisq_min, B0, B2):
+        self.ar = ar
+        self.at = at
+        self.xitemp = self.make_xi_temp()
+        chisq = self.B0_B2_optimize((B0, B2))  # this sets A hat coefficients
+        assert chisq == chisq_min
+        r_full = np.arange(1, 151)
+        self.xitemp = self.make_xi_temp(r0=r_full)
+        ximod0, ximod2 = self.make_model_vector(B0, B2, r0=r_full)
+        return np.array([r_full, ximod0, ximod2]).T
 
 
 def baofit(argv):
@@ -233,14 +255,14 @@ def baofit(argv):
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
                        r_min=rmin, r_max=150,
                        xi_temp_weighted=False, xi_temp_rescale=1)
-        fit.make_xi_temp()
+        fit.xitemp = fit.make_xi_temp()
         # determine best-fit rescaling factor and target bias using xi_0
         xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
             fit.xitemp['0'].T, fit.xitemp['0'])
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
                        r_min=rmin, r_max=80,
                        xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
-        fit.make_xi_temp()
+        fit.xitemp = fit.make_xi_temp()
         B0_list = np.arange(0.1, 2, 0.01)
         chisq = np.zeros(B0_list.shape)
         for i, B0 in enumerate(B0_list):
@@ -257,9 +279,11 @@ def baofit(argv):
         fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit.B0_ln_width = 0.4
         fit.B2_ln_width = 0.4
-        chisq_grid, chisq_table = fit.chisq_scan()
+        chisq_grid, chisq_table, model_dump = fit.chisq_scan()
         np.savetxt(path_cg, chisq_grid, fmt=txtfmt)
         np.savetxt(path_ct, chisq_table, fmt=txtfmt)
+        np.savetxt(path_cg.replace('chisq_grid.txt', 'xi_0_2_model.txt'),
+                   model_dump, fmt=txtfmt)
         ar, at, chisq = chisq_table[np.argmin(chisq_table[:, 2]), :]
         print('\nBest-fit ar, at, chisq: ({}, {}), {}'
               .format(ar, at, chisq))
