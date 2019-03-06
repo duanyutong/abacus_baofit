@@ -40,7 +40,7 @@ from baofit import baofit
 #tagout = 'mmatter'
 #phases = range(20)
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'norsd'  # 'norsd'  # '# 'matter'  # 'z0.5'
+tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 #model_names = ['gen_base1', 'gen_base6', 'gen_base7',
 #               'gen_ass1',  'gen_ass1_n',
@@ -49,7 +49,7 @@ phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 #               'gen_s1',    'gen_s1_n',
 #               'gen_sv1',   'gen_sv1_n',
 #               'gen_sp1',   'gen_sp1_n']
-model_names = ['gen_base1']
+model_names = ['matter']
 reals = range(12)  # range(12)
 N_threads = 24  # number of threads for a single realisation
 do_create = False
@@ -1120,8 +1120,8 @@ class FitterCache:
 
     def baofit_parallel(self, parameters):
         # input beta prime in [0, 0.04] in 0.001 steps, beta in [0, 0.4]
-        beta_prime = np.around(parameters[0], decimals=3)
-        beta = beta_prime * 10
+        beta_prime = parameters[0]
+        beta = np.around(beta_prime * 10, decimals=3)
         r_rescale_factor = np.around(parameters[1], decimals=4)
         if np.isnan(beta) or np.isnan(r_rescale_factor):
             print('NaN parameters encountered, returning NaN...')
@@ -1193,23 +1193,27 @@ class FitterCache:
         alpha['gal'] = {'r': np.array([item[0] for item in ret]),
                         't': np.array([item[1] for item in ret])}
         aiso = np.power(alpha['gal']['r'], 1/3) \
-            + np.power(alpha['gal']['t'], 2/3)
+            * np.power(alpha['gal']['t'], 2/3)
         if beta not in self.results.keys():
             self.results[beta] = {}
-        result = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso-1)
+        res = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso - 1)
         print('Returning new result to optimiser: {}, {}, {}'
-              .format(beta, r_rescale_factor, result))
-        return result
+              .format(beta, r_rescale_factor, res))
+        return res
 
 
 def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std'):
 
     cache = FitterCache(0, 1.002, model_name, recon_type)
     ret = minimize(
-        cache.baofit_parallel, (0, 1.002),
-        bounds=((-0.0001, 0.006), (1, 1.0035)), method='SLSQP',
-        options={'ftol': 3e-05, 'eps': 1e-3, 'maxiter': 4, 'disp': True})
-    print('Results:', cache.results)
+        cache.baofit_parallel, (0, 1.0018),
+        bounds=((0, 0.001), (1.0016, 1.0020)), method='SLSQP',
+        options={'ftol': 5e-06, 'eps': 1e-4, 'maxiter': 4, 'disp': True})
+    print('Results:')
+    for beta in cache.results.keys():
+        for r_rescale_factor in cache.results[beta].keys():
+            print('{:.3f}, {:.4f}, {:.6f}'.format(
+                beta, r_rescale_factor, cache.results[beta][r_rescale_factor]))
     if ret.success:
         print('Best parameters: beta = {}, r_rescale_factor = {})'
               .format(ret.x[0]*10, ret.x[1]))
@@ -1269,7 +1273,12 @@ if __name__ == "__main__":
             p.close()
             p.join()
     if do_optimise_fitter:
-        optimise_fitter(model_name='gen_base1', recon_type='post-recon-std')
+        optimise_fitter(model_name='matter', recon_type='post-recon-std')
     if do_fit:
         for model_name in model_names:
-            cache = FitterCache(0, 1.002, model_name, 'post-recon-std')
+            '''
+            best-fit parameters for
+            matter: beta = 0.01, r_rescale_factor = 1.00166
+            galaxy: beta = 0.00, r_rescale_factor = 1.00180
+            '''
+            cache = FitterCache(0, 1.0017, model_name, 'post-recon-std')

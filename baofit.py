@@ -47,24 +47,19 @@ class baofit3D:
         self.polydeg = polydeg
         self.xi_temp_weighted = xi_temp_weighted
         self.xi_temp_rescale = xi_temp_rescale
-        # monoquad r vector, with factor to correct for pairs should have
-        # slightly larger average pair distance than the bin center
         r_mask = (r_min < r) & (r < r_max)
         self.r = r[r_mask]
         self.rfull = np.arange(1, 151)
-        self.rv = np.hstack([self.r, self.r])  # * 1.000396  # debug
-        self.xidata = {'0': xi_0[r_mask], '2': xi_2[r_mask]}
+        self.rv = np.hstack([self.r, self.r])
+        self.xidata = {'0': xi_0[r_mask],
+                       '2': xi_2[r_mask]}
         self.dv = np.hstack([self.xidata['0'], self.xidata['2']])
-        print(('\nReconstructed: {}, '
-               'xi template rescale factor: {:.2f}, shape of data vector: {}')
-              .format(reconstructed, xi_temp_rescale, self.dv.shape))
         ri_mask = np.tile(r_mask, (len(r_mask), 1)).T
         rj_mask = np.tile(r_mask, (len(r_mask), 1))
         quadrant_mask = ri_mask & rj_mask
         covm_mask = np.tile(quadrant_mask, (2, 2))
         self.cov = cov[covm_mask].reshape(self.dv.size, self.dv.size)
         self.icov = np.linalg.pinv(self.cov)
-        # print('{} - Length of data vector: {}'.format(fout_tag, dv.size))
         self.n = self.r.size
         self.H = np.zeros((2*self.n, 6))
         if self.polydeg == '1':  # set up auxillary matrix H
@@ -90,6 +85,9 @@ class baofit3D:
         self.B0_ln_width = 100
         self.B2_ln_width = 100
         self.A = np.zeros(6)
+        print(('\nFitting recon sample: {}, '
+               'xi template rescale factor: {:.2f}, data vector shape: {}')
+              .format(reconstructed, xi_temp_rescale, self.dv.shape))
 
     def xi_r_mu(self, r, mu, ell_max=6):
         ''' input r may be 2D, return 2D xi_r_mu(r, mu) '''
@@ -99,7 +97,7 @@ class baofit3D:
             xi_ell = self.xi_multipole[order](r)
             Ln = legendre(order)
             xi += xi_ell * Ln(mu)
-        return xi*self.xi_temp_rescale
+        return xi * self.xi_temp_rescale
 
     def xi_temp_components(self, r, component='mu2'):
         ''' rescaled xi_0, xi_2, xi_mu_2 as a function of 1D r array '''
@@ -179,8 +177,8 @@ class baofit3D:
         return self.calculate_chisq(B0, B2)
 
     def chisq_scan(self,
-                   armin=0.994, armax=1.006, arsp=0.0005,
-                   atmin=0.996, atmax=1.004, atsp=0.0005):
+                   armin=0.995, armax=1.005, arsp=0.0002,
+                   atmin=0.996, atmax=1.004, atsp=0.0002):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006
@@ -226,7 +224,7 @@ def baofit(argv):
     try:
         z, recon, polydeg, rmin, beta, r_rescale_factor, path_p_lin, \
             path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
-        print('Saving chisq results to:', os.path.dirname(path_cg))
+        print('Saving chisq:', os.path.dirname(path_cg))
         if not os.path.exists(os.path.dirname(path_cg)):
             try:
                 os.mkdir(os.path.dirname(path_cg))
@@ -236,21 +234,19 @@ def baofit(argv):
         k = data[:, 0]
         P_lin = data[:, 1]
         data = np.loadtxt(path_xi_0)
+        # monoquad r vector, with factor to correct for pairs should have
+        # slightly larger average pair distance than the bin center
         r = data[:, 0] * r_rescale_factor
         xi_0 = data[:, 1]
         xi_2 = np.loadtxt(path_xi_2)[:, 1]
-        cov = np.loadtxt(path_cov)  # combined monopole, quadrupole cov matrix
+        cov = np.loadtxt(path_cov)
         assert type(recon) is bool
-        # print('xi samplesa are reconstructed:', recon)
-        try:
-            assert (r.size == xi_0.size == xi_2.size
-                    == cov.shape[0]/2 == cov.shape[1]/2)
-            assert not np.any(cov == np.nan)
-        except AssertionError:
-            print('Assertion error, shapes', r.shape, xi_0.shape, xi_2.shape,
-                  cov.shape[0]/2, cov.shape[1]/2)
-            print('NaN values in cov at: ', np.where(cov == np.nan))
-            raise Exception
+        assert (r.size == xi_0.size == xi_2.size
+                == cov.shape[0]/2 == cov.shape[1]/2), \
+            'Assertion error, shapes {}, {}, {}, {}, {}'.format(
+            r.shape, xi_0.shape, xi_2.shape, cov.shape[0]/2, cov.shape[1]/2)
+        assert not np.any(cov == np.nan), (
+            'NaN values in cov at: {}'.format(np.where(cov == np.nan)))
         # find best B_0 from bias prior, reduced range
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
                        r_min=rmin, r_max=150,
