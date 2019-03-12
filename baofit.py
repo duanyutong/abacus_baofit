@@ -177,8 +177,8 @@ class baofit3D:
         return self.calculate_chisq(B0, B2)
 
     def chisq_scan(self,
-                   armin=0.995, armax=1.005, arsp=0.0002,
-                   atmin=0.996, atmax=1.004, atsp=0.0002):
+                   armin=0.990, armax=1.005, arsp=0.0006,
+                   atmin=0.995, atmax=1.006, atsp=0.0006):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006

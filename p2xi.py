@@ -110,7 +110,7 @@ class PowerTemplate:
         This is the final power template from P_lin and P_nw
         including the C and exponential damping terms
         input k, P are 1D arrays from CAMB, n_mu_bins is an integer
-        defauolt beta = 0.4, dimensionless
+        default beta = 0.4, dimensionless
         """
         self.k = k_lin  # 1D array
         self.P_lin = P_lin  # 1D array

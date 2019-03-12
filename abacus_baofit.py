@@ -16,7 +16,7 @@ import subprocess
 import traceback
 import numpy as np
 import numpy.lib.recfunctions as rfn
-from scipy.optimize import minimize
+from scipy import optimize
 from astropy import table
 from halotools.mock_observables import tpcf_multipole
 from halotools.mock_observables.two_point_clustering.s_mu_tpcf import \
@@ -37,10 +37,10 @@ from baofit import baofit
 
 # %% custom settings
 #sim_name_prefix = 'AbacusCosmos_1100box_planck'
-#tagout = 'mmatter'
+#tagout = ''
 #phases = range(20)
 sim_name_prefix = 'emulator_1100box_planck'
-tagout = 'mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
+tagout = '-recon'  # 'norsd'  # '# 'matter'  # 'z0.5'
 phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 #model_names = ['gen_base1', 'gen_base6', 'gen_base7',
 #               'gen_ass1',  'gen_ass1_n',
@@ -49,7 +49,7 @@ phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 #               'gen_s1',    'gen_s1_n',
 #               'gen_sv1',   'gen_sv1_n',
 #               'gen_sp1',   'gen_sp1_n']
-model_names = ['matter']
+model_names = ['gen_base1']
 reals = range(12)  # range(12)
 N_threads = 24  # number of threads for a single realisation
 do_create = False
@@ -85,7 +85,7 @@ rp_bins = pi_bins
 
 # %% fixed catalogue parameters
 store_dir = '/home/dyt/store/'
-save_dir = os.path.join(store_dir, sim_name_prefix+'-'+tagout)
+save_dir = os.path.join(store_dir, sim_name_prefix+tagout)
 recon_temp_dir = os.path.join(store_dir, 'recon/temp')
 txtfmt = b'%.30e'
 if sim_name_prefix == 'emulator_1100box_planck':
@@ -1106,7 +1106,7 @@ def combine_galaxy_table_metadata(phases):
 
 class FitterCache:
 
-    def __init__(self, beta, r_rescale_factor, model_name, recon_type):
+    def __init__(self, model_name, recon_type, beta=0, r_rescale_factor=1):
         '''
         input parameters are: (beta, r_rescale_factor)
         '''
@@ -1116,13 +1116,13 @@ class FitterCache:
         self.model_name = model_name
         self.recon_type = recon_type
         self.results = {}  # initialise lookup dict results[beta][r_fac]
-        self.baofit_parallel((beta/10, r_rescale_factor))  # pass beta prime
+        # self.baofit_parallel((beta/100, r_rescale_factor))  # pass beta prime
 
     def baofit_parallel(self, parameters):
         # input beta prime in [0, 0.04] in 0.001 steps, beta in [0, 0.4]
         beta_prime = parameters[0]
-        beta = np.around(beta_prime * 10, decimals=3)
-        r_rescale_factor = np.around(parameters[1], decimals=4)
+        beta = np.around(beta_prime * 100, decimals=3)
+        r_rescale_factor = np.around(parameters[1], decimals=5)
         if np.isnan(beta) or np.isnan(r_rescale_factor):
             print('NaN parameters encountered, returning NaN...')
             return np.nan
@@ -1137,7 +1137,7 @@ class FitterCache:
             'z{}'.format(redshift))
         outdir = os.path.join(
             save_dir,
-            '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.4f}'
+            '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.5f}'
             .format(self.polydeg, self.rmin, beta, r_rescale_factor))
         list_of_inputs = []
         xi_type = self.recon_type + '-15.0_hmpc'
@@ -1177,48 +1177,65 @@ class FitterCache:
                 [redshift, recon, self.polydeg, self.rmin, beta,
                  r_rescale_factor, path_p_lin, path_xi_0, path_xi_2, path_cov,
                  path_cg, path_ct])
-            path_matter = os.path.join(
-                store_dir, sim_name_prefix+'-mmatter',
-                '2Dbaofits_poly3_rmin_50',
-                'matter-{}-{}-chisq_table.txt'.format(phase, xi_type))
-            chisq_table = np.loadtxt(path_matter)
-            ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
-            alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
+            # path_matter = os.path.join(
+            #     store_dir, sim_name_prefix+'-mmatter',
+            #     '2Dbaofits_poly3_rmin_50',
+            #     'matter-{}-{}-chisq_table.txt'.format(phase, xi_type))
+            # chisq_table = np.loadtxt(path_matter)
+            # ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
+            # alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
         with closing(MyPool(processes=len(list_of_inputs),
                             maxtasksperchild=1)) as p:
             ret = p.map(baofit, list_of_inputs)
         p.close()
         p.join()
-        # subtract real-space matter field values and return difference
         alpha['gal'] = {'r': np.array([item[0] for item in ret]),
                         't': np.array([item[1] for item in ret])}
         aiso = np.power(alpha['gal']['r'], 1/3) \
             * np.power(alpha['gal']['t'], 2/3)
         if beta not in self.results.keys():
             self.results[beta] = {}
-        res = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso - 1)
+        res = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso - 1) \
+            + np.linalg.norm(alpha['gal']['r']-1) * 1/3 \
+            + np.linalg.norm(alpha['gal']['t']-1) * 2/3
         print('Returning new result to optimiser: {}, {}, {}'
               .format(beta, r_rescale_factor, res))
         return res
 
 
-def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std'):
+def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
+                    brute=True):
 
-    cache = FitterCache(0, 1.002, model_name, recon_type)
-    ret = minimize(
-        cache.baofit_parallel, (0, 1.0018),
-        bounds=((0, 0.001), (1.0016, 1.0020)), method='SLSQP',
-        options={'ftol': 5e-06, 'eps': 1e-4, 'maxiter': 4, 'disp': True})
+    betap = np.arange(0.0000, 0.0050, 0.0010)
+    r_res = np.arange(1.0019, 1.0028, 0.0001)
+    cache = FitterCache(model_name, recon_type)
+    if brute:
+        grid = np.zeros((betap.size, r_res.size))
+        table = []
+        for i, j in product(range(betap.size), range(r_res.size)):
+            print('Brute progress currently: {}/{}'
+                  .format(i*betap.size)+j+1, betap.size*r_res.size)
+            grid[i, j] = cache.baofit_parallel((betap[i], r_res[j]))
+            table.append([betap[i]*100, r_res[j], grid[i, j]])
+        np.savetxt(os.path.join(save_dir, 'brute_grid.txt'), grid)
+        np.savetxt(os.path.join(save_dir, 'brute_table.txt'), np.array(table))
+    else:
+        beta, r_rescale_factor = 0.20, 1.001
+        bounds = ((0, 0.0005), (1, 1.0020))
+        ret = optimize.minimize(
+            cache.baofit_parallel, (beta/100, r_rescale_factor),
+            bounds=bounds, method='SLSQP',
+            options={'ftol': 5e-06, 'eps': 8e-4, 'maxiter': 6, 'disp': True})
+        if ret.success:
+            print('Best parameters: beta = {}, r_rescale_factor = {})'
+                  .format(ret.x[0]*100, ret.x[1]))
+        else:
+            print('fitter optimiser failed', ret.message)
     print('Results:')
     for beta in cache.results.keys():
         for r_rescale_factor in cache.results[beta].keys():
-            print('{:.3f}, {:.4f}, {:.6f}'.format(
+            print('{:.3f}, {:.5f}, {:.7f}'.format(
                 beta, r_rescale_factor, cache.results[beta][r_rescale_factor]))
-    if ret.success:
-        print('Best parameters: beta = {}, r_rescale_factor = {})'
-              .format(ret.x[0]*10, ret.x[1]))
-    else:
-        print('fitter optimiser failed', ret.message)
 
 
 if __name__ == "__main__":
@@ -1273,12 +1290,19 @@ if __name__ == "__main__":
             p.close()
             p.join()
     if do_optimise_fitter:
-        optimise_fitter(model_name='matter', recon_type='post-recon-std')
+        # for recon in ['post-recon-std', 'post-recon-ite']:
+        optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
+                        brute=True)
     if do_fit:
         for model_name in model_names:
             '''
-            best-fit parameters for
-            matter: beta = 0.01, r_rescale_factor = 1.00166
-            galaxy: beta = 0.00, r_rescale_factor = 1.00180
+            best-fit parameters for 16-box sim:
+            real-sapce matter: beta = 0.00, r_rescale_factor = 1.00174
+            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00252
+            *** real-space galaxy: beta = 0.00, r_rescale_factor = 1.00180 ***
+
+            best-fit parameters for 20-box sim:
+            real-sapce matter: beta = 0.00, r_rescale_factor = 0.99843
+            redshift-space ga: beta = 0.00, r_rescale_factor = 0.9984, 0.0191
             '''
-            cache = FitterCache(0, 1.0017, model_name, 'post-recon-std')
+            cache = FitterCache(0, 1.00166, model_name, 'post-recon-std')
