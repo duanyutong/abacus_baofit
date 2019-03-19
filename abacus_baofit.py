@@ -950,7 +950,7 @@ def coadd_realisations(model_name, phase, reals):
                                            '.txt', '-coadd.txt')
                 copyfile(src, dst)
         print('Phase {}, model {}: coadding x-corr for {} realisations...'
-              .format(len(reals), phase, model_name))
+              .format(phase, model_name, len(reals)))
         cross_temps = []
         if 'pre-recon' in recon_types:
             cross_temps = cross_temps + [
@@ -1079,7 +1079,8 @@ def do_cov(model_name):
         filepath = os.path.join(  # save to coadd folder for all phases
             save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
             'z{}'.format(redshift),
-            '{}-cross-xi_monoquad-cov-{}-{}.txt'.format(model_name, rec, rand))
+            '{}-cross-xi_monoquad-cov-smu-{}-{}.txt'
+            .format(model_name, rec, rand))
         np.savetxt(filepath, cov_monoquad, fmt=txtfmt)
         print('Monoquad covariance matrix saved to: ', filepath)
 
@@ -1108,7 +1109,7 @@ def combine_galaxy_table_metadata(phases):
 
 class FitterCache:
 
-    def __init__(self, model_name, recon_type, real_space=False,
+    def __init__(self, model_name, recon_type, force_isotropy=False,
                  beta=0, rmin=50, r_rescale_factor=1):
         '''
         input parameters are: (beta, r_rescale_factor)
@@ -1117,31 +1118,27 @@ class FitterCache:
         self.rmin = 50
         self.model_name = model_name
         self.recon_type = recon_type
-        self.real_space = real_space
+        self.force_isotropy = force_isotropy
         self.results = {}  # initialise lookup dict results[beta][r_fac]
-        self.baofit_parallel((beta/100, r_rescale_factor))  # pass beta prime
+        self.baofit_parallel((beta, 1))  # pass beta prime
 
     def baofit_parallel(self, parameters):
-        # input beta prime in [0, 0.04] in 0.001 steps, beta in [0, 0.4]
-        beta_prime = parameters[0]
-        beta = np.around(beta_prime * 100, decimals=3)
-        r_rescale_factor = np.around(parameters[1], decimals=5)
-        if np.isnan(beta) or np.isnan(r_rescale_factor):
+        # input beta and r_rescale factor (algways ignored)
+        beta = np.around(parameters[0], decimals=2)
+        if np.isnan(beta):
             print('NaN parameters encountered, returning NaN...')
             return np.nan
         if beta in self.results.keys():
-            if r_rescale_factor in self.results[beta].keys():
-                print('Returning cached result to optimiser: {}, {}, {}'
-                      .format(beta, r_rescale_factor,
-                              self.results[beta][r_rescale_factor]))
-                return self.results[beta][r_rescale_factor]
+            print('Returning cached result to optimiser: '
+                  'beta = {}, error = {:.6f}'
+                  .format(beta, self.results[beta]))
+            return self.results[beta]
         indir = os.path.join(
             save_dir, '{}_{:02}-coadd'.format(sim_name_prefix, cosmology),
             'z{}'.format(redshift))
-        outdir = os.path.join(
-            save_dir,
-            '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}_r_{:.5f}'
-            .format(self.polydeg, self.rmin, beta, r_rescale_factor))
+        outdir = os.path.join(save_dir,
+                              '2Dbaofits_poly{}_rmin_{}_beta_{:.3f}'
+                              .format(self.polydeg, self.rmin, beta))
         list_of_inputs = []
         xi_type = self.recon_type + '-15.0_hmpc'
         alpha = {}
@@ -1182,8 +1179,8 @@ class FitterCache:
             path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
             path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
             list_of_inputs.append(
-                [redshift, recon, self.real_space, self.polydeg, self.rmin,
-                 beta, r_rescale_factor, path_p_lin, path_xi_0, path_xi_2,
+                [redshift, recon, self.force_isotropy, self.polydeg, self.rmin,
+                 beta, path_p_lin, path_xi_0, path_xi_2,
                  path_cov, path_cg, path_ct])
             # path_matter = os.path.join(
             #     store_dir, sim_name_prefix+'-mmatter',
@@ -1192,10 +1189,11 @@ class FitterCache:
             # chisq_table = np.loadtxt(path_matter)
             # ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
             # alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
-        ret = [baofit(list_of_inputs[0])]  # debug
-#        with closing(MyPool(processes=18,
-#                            maxtasksperchild=1)) as p:
-#            ret = p.map(baofit, list_of_inputs)
+        # ret = [baofit(list_of_inputs[0])]  # debug
+        # N_proc = len(phases) if len(phases) <= 20 else int(len(phases)/2)
+        with closing(MyPool(processes=len(phases),
+                            maxtasksperchild=1)) as p:
+            ret = p.map(baofit, list_of_inputs)
         p.close()
         p.join()
         alpha['gal'] = {'r': np.array([item[0] for item in ret]),
@@ -1204,47 +1202,39 @@ class FitterCache:
         #     * np.power(alpha['gal']['t'], 2/3)
         if beta not in self.results.keys():
             self.results[beta] = {}
-        res = self.results[beta][r_rescale_factor] = \
+        ret = self.results[beta] = \
             + np.linalg.norm(alpha['gal']['r']-1) * 1/3 \
             + np.linalg.norm(alpha['gal']['t']-1) * 2/3
-        print('Returning new result to optimiser: {}, {}, {}'
-              .format(beta, r_rescale_factor, res))
-        return res
+        print('Returning new result to optimiser: beta = {}, error = {:.6f}'
+              .format(beta, ret))
+        return ret
 
 
-def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
-                    brute=True):
+def optimise_fitter(model_name, recon_type, brute=True):
 
     cache = FitterCache(model_name, recon_type)
     if brute:
-        betap = np.arange(0.0000, 0.001, 0.0005)
-        r_res = np.array([1])
-        grid = np.zeros((betap.size, r_res.size))
-        table = []
-        for i, j in product(range(betap.size), range(r_res.size)):
-            print('Brute progress currently: {}/{}'
-                  .format(i*betap.size+j+1, betap.size*r_res.size))
-            grid[i, j] = cache.baofit_parallel((betap[i], r_res[j]))
-            table.append([betap[i]*100, r_res[j], grid[i, j]])
-        np.savetxt(os.path.join(save_dir, 'brute_grid.txt'), grid)
-        np.savetxt(os.path.join(save_dir, 'brute_table.txt'), np.array(table))
+        betas = np.arange(0, 0.5, 0.01)
+        errors = np.zeros(betas.size)
+        for i, beta in enumerate(betas):
+            print('Brute progress currently: {}/{}'.format(i, beta.size))
+            errors[i] = cache.baofit_parallel(beta)
+        np.savetxt(os.path.join(save_dir, 'brute_beta.txt'),
+                   np.hstack(betas, errors).T, fmt=txtfmt)
     else:
-        beta, r_rescale_factor = 0, 0.997
-        bounds = ((0, 0.0005), (0.9966, 0.9978))
+        beta = 0
+        bounds = ((0, 0.5), (1, 1))
         ret = optimize.minimize(
-            cache.baofit_parallel, (beta/100, r_rescale_factor),
-            bounds=bounds, method='SLSQP',
-            options={'ftol': 5e-06, 'eps': 1e-4, 'maxiter': 6, 'disp': True})
+            cache.baofit_parallel, (beta, 1), bounds=bounds, method='SLSQP',
+            options={'ftol': 1e-5, 'eps': 1e-2, 'maxiter': 4, 'disp': True})
         if ret.success:
-            print('Best parameters: beta = {}, r_rescale_factor = {})'
-                  .format(ret.x[0]*100, ret.x[1]))
+            print('Best beta = {}'.format(ret.x))
         else:
             print('fitter optimiser failed', ret.message)
     print('Results:')
     for beta in cache.results.keys():
-        for r_rescale_factor in cache.results[beta].keys():
-            print('{:.3f}, {:.5f}, {:.7f}'.format(
-                beta, r_rescale_factor, cache.results[beta][r_rescale_factor]))
+        print('beta = {:.2f}, error = {:.6f}'
+              .format(beta, cache.results[beta]))
 
 
 if __name__ == "__main__":
@@ -1302,21 +1292,27 @@ if __name__ == "__main__":
             p.join()
     if do_optimise_fitter:
         # for recon in ['post-recon-std', 'post-recon-ite']:
-        optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
-                        brute=False)
+        for model_name in model_names:
+            optimise_fitter('matter', 'pre-recon', brute=False)
     if do_fit:
         for model_name in model_names:
-            '''
-            best-fit parameters for 16-box sim:
-            real-sapce matter: beta = 0.00, r_rescale_factor = 1.00174
-            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
+            for recon in recon_types:
+                '''
+                best-fit parameters for 16-box sim:
+                real-sapce matter: beta = 0.00, r_rescale_factor = 1.00174
+                redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
 
-            best-fit parameters for 20-box sim:
-            real-sapce matter: beta = 0.00, r_rescale_factor = 0.99843
-            redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
+                best-fit parameters for 20-box sim:
+                real-space matter: beta = 0.00, r_rescale_factor = 0.99843
+                redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
 
-            we expect a 0.2% shift due to nonlinear evolution when fitting with
-            a linear power spectrum, no need to fiddle with r-rescaling
-            '''
-            cache = FitterCache(model_name, 'post-recon-std', real_space=True,
-                                beta=0, rmin=50, r_rescale_factor=1.0018)
+                we expect a 0.2% shift due to nonlinear evolutions when fitting
+                with a linear power spectrum which does not account for
+                nonlinear effects; no need to fiddle with r-rescaling
+
+                best-fit parameters for 36-box joint set:
+                real-space matter: beta = 0.00
+                redshift-space ga: beta = 0.00 ?
+                '''
+                cache = FitterCache(model_name, recon,
+                                    force_isotropy=False, beta=0, rmin=50)

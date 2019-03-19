@@ -35,17 +35,18 @@ def matmul(*args):
 class baofit3D:
 
     def __init__(self, z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta,
-                 reconstructed, real_space=False, r_min=50, r_max=150,
+                 reconstructed, force_isotropy=False, r_min=50, r_max=150,
                  xi_temp_weighted=False, xi_temp_rescale=1):
 
         power = PowerTemplate(z=z)
         Sigma_s = 4  # 4 Mpc/h, streaming scale
-        Sigma_r = 15  # 15 Mpc/h, smoothing scale used in reconstruction
-        if reconstructed:
+        Sigma_r = 5  # 15 Mpc/h, smoothing scale used in reconstruction
+        self.reconstructed = reconstructed
+        if self.reconstructed:
             Sigma_perp = 0  # 2.5 Mpc/h, the smaller, the sharper BAO peak
             # Sigma_para = 4  # Mpc/h
-        else:
-            Sigma_perp = 6  # 6 Mpc/h
+        else:  # pre-recon peak is wider
+            Sigma_perp = 1.5  # 6 Mpc/h
             # Sigma_para = 10  # Mpc/h
         Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
         power.P(k, P_lin, n_mu_bins, beta=beta, Sigma_s=Sigma_s,
@@ -54,7 +55,7 @@ class baofit3D:
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
                 r, power.xi_multipole(r, ell=ell))
-        self.real_space = real_space
+        self.force_isotropy = force_isotropy
         self.polydeg = polydeg
         self.xi_temp_weighted = xi_temp_weighted
         self.xi_temp_rescale = xi_temp_rescale
@@ -96,9 +97,10 @@ class baofit3D:
         self.B0_ln_width = 100
         self.B2_ln_width = 100
         self.A = np.zeros(6)
-        print(('\nFitting recon sample: {}, '
-               'xi template rescale factor: {:.2f}, data vector shape: {}')
-              .format(reconstructed, xi_temp_rescale, self.dv.shape))
+#        print(('\nReconstructed: {}, force isotropy: {}, '
+#               'xitemp rescale factor: {:.2f}, data vector shape: {}')
+#              .format(reconstructed, force_isotropy, xi_temp_rescale,
+#                      self.dv.shape))
 
     def xi_r_mu(self, r, mu, ell_max=6):
         ''' input r may be 2D, return 2D xi_r_mu(r, mu) '''
@@ -186,23 +188,24 @@ class baofit3D:
         self.make_model_vector(B0, B2)  # now make new mv with A hat
         return self.calculate_chisq(B0, B2)
 
-    def chisq_scan(self,
-                   armin=0.990, armax=1.010, arsp=0.0001,
-                   atmin=0.990, atmax=1.010, atsp=0.0001):
+    def chisq_scan(self):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006
         '''
-        ars = np.arange(armin, armax, arsp)
-        ats = np.arange(atmin, atmax, atsp)
+        if self.reconstructed:
+            ars = np.arange(0.9960, 1.0000, 0.0001)
+            ats = np.arange(0.9990, 1.0010, 0.0001)
+        else:
+            ars = np.arange(1.0060, 1.0120, 0.0001)
+            ats = np.arange(0.9970, 1.0020, 0.0001)
         chisq_grid = np.zeros((ars.size, ats.size))  # default value is 0
         B0_grid = np.zeros(chisq_grid.shape)
         B2_grid = np.zeros(chisq_grid.shape)
         chisq_list = []
         print('\nChi-square grid scan size', chisq_grid.size)
-        print('realspace:', self.real_space)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
-            if self.real_space and ars[i] != ats[j]:
+            if self.force_isotropy and ars[i] != ats[j]:
                 continue
             self.ar = ars[i]
             self.at = ats[j]
@@ -238,10 +241,9 @@ class baofit3D:
 
 def baofit(argv):
     try:
-        z, recon, real_space, polydeg, rmin, beta, r_rescale_factor, \
-            path_p_lin, path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
+        z, recon, force_isotropy, polydeg, rmin, beta, path_p_lin, \
+            path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
         print('Saving chisq:', os.path.dirname(path_cg))
-        print('baofit real-space', real_space)
         if not os.path.exists(os.path.dirname(path_cg)):
             try:
                 os.mkdir(os.path.dirname(path_cg))
@@ -253,7 +255,7 @@ def baofit(argv):
         data = np.loadtxt(path_xi_0)
         # monoquad r vector, with factor to correct for pairs should have
         # slightly larger average pair distance than the bin center
-        r = data[:, 0] * r_rescale_factor
+        r = data[:, 0]
         xi_0 = data[:, 1]
         xi_2 = np.loadtxt(path_xi_2)[:, 1]
         cov = np.loadtxt(path_cov)
@@ -266,14 +268,14 @@ def baofit(argv):
             'NaN values in cov at: {}'.format(np.where(cov == np.nan)))
         # find best B_0 from bias prior, reduced range
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       real_space=real_space, r_min=rmin, r_max=150,
+                       force_isotropy=force_isotropy, r_min=rmin, r_max=150,
                        xi_temp_weighted=False, xi_temp_rescale=1)
         fit.xitemp = fit.make_xi_temp()
         # determine best-fit rescaling factor and target bias using xi_0
         xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
             fit.xitemp['0'].T, fit.xitemp['0'])
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       real_space=real_space, r_min=rmin, r_max=80,
+                       force_isotropy=force_isotropy, r_min=rmin, r_max=80,
                        xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
         fit.xitemp = fit.make_xi_temp()
         B0_list = np.arange(0.1, 2, 0.01)
@@ -287,7 +289,7 @@ def baofit(argv):
              .format(B0_list[np.argmin(chisq)], chisq.min()))
         # update prior and do chisq grid scan, full range
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       real_space=real_space, r_min=rmin, r_max=150,
+                       force_isotropy=force_isotropy, r_min=rmin, r_max=150,
                        xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
         fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit.B0_ln_width = 0.4
