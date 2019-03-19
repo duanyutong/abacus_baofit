@@ -36,25 +36,31 @@ from baofit import baofit
 
 
 # %% custom settings
+
+#sim_name_prefix = 'emulator_1100box_planck'
+#tagout = '-mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
+#phases = range(16)  # range(16)  # [0, 1] # list(range(16))
 #sim_name_prefix = 'AbacusCosmos_1100box_planck'
-#tagout = ''
+#tagout = '-mmatter'
 #phases = range(20)
-sim_name_prefix = 'emulator_1100box_planck'
-tagout = '-recon'  # 'norsd'  # '# 'matter'  # 'z0.5'
-phases = range(16)  # range(16)  # [0, 1] # list(range(16))
-#model_names = ['gen_base1', 'gen_base6', 'gen_base7',
-#               'gen_ass1',  'gen_ass1_n',
-#               'gen_ass2',  'gen_ass2_n',
-#               'gen_vel2',  'gen_vel1',
-#               'gen_s1',    'gen_s1_n',
-#               'gen_sv1',   'gen_sv1_n',
-#               'gen_sp1',   'gen_sp1_n']
-model_names = ['gen_base1']
-reals = range(12)  # range(12)
+sim_name_prefix = 'joint_1100box_planck'
+tagout = '-mmatter'
+phases = range(36)
+
+model_names = ['gen_base1', 'gen_base6', 'gen_base7',
+               'gen_ass1',  'gen_ass1_n',
+               'gen_ass2',  'gen_ass2_n',
+               'gen_vel2',  'gen_vel1',
+               'gen_s1',    'gen_s1_n',
+               'gen_sv1',   'gen_sv1_n',
+               'gen_sp1',   'gen_sp1_n']
+model_names = ['matter']
+reals = range(1)  # range(12)
 N_threads = 24  # number of threads for a single realisation
 do_create = False
-do_optimise_fitter = True
-do_fit = False
+do_coadd = True
+do_optimise_fitter = False
+do_fit = True
 
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -787,8 +793,8 @@ def do_realisation(r, phase, model_name, overwrite=False,
                 print('r = {:2d}, calculating pre-recon FFTcorr...'.format(r))
                 subprocess.call(
                     ['python', './recon/reconstruct/reconst.py',
-                     '0', ('rsd' if use_rsd else 'real'), str(seed),
-                     model_name, filedir, str(bias)])
+                     '0', ('rsd' if use_rsd else 'real'),
+                     str(seed), model_name, filedir, str(bias)])
             # check that reconstructed catalogue exists
             if do_recon_std:
                 print('r = {:2d}, now applying standard recon...'.format(r))
@@ -951,7 +957,7 @@ def coadd_realisations(model_name, phase, reals):
                                    os.path.basename(src)).replace(
                                            '.txt', '-coadd.txt')
                 copyfile(src, dst)
-        print('Coadding x-corr for {} realisations,  phase {}, model {}...'
+        print('Coadding x-corr for {} realisations, phase {}, model {}...'
               .format(len(reals), phase, model_name))
         coadd_fl = []
         for fn in [
@@ -1106,17 +1112,18 @@ def combine_galaxy_table_metadata(phases):
 
 class FitterCache:
 
-    def __init__(self, model_name, recon_type, beta=0, r_rescale_factor=1):
+    def __init__(self, model_name, recon_type, real_space=False,
+                 beta=0, rmin=50, r_rescale_factor=1):
         '''
         input parameters are: (beta, r_rescale_factor)
         '''
-
         self.polydeg = '3'  # optimise parameters for each polynomial degree
         self.rmin = 50
         self.model_name = model_name
         self.recon_type = recon_type
+        self.real_space = real_space
         self.results = {}  # initialise lookup dict results[beta][r_fac]
-        # self.baofit_parallel((beta/100, r_rescale_factor))  # pass beta prime
+        self.baofit_parallel((beta/100, r_rescale_factor))  # pass beta prime
 
     def baofit_parallel(self, parameters):
         # input beta prime in [0, 0.04] in 0.001 steps, beta in [0, 0.4]
@@ -1145,11 +1152,16 @@ class FitterCache:
         alpha['mat'] = {'r': np.zeros(len(phases)),
                         't': np.zeros(len(phases))}
         for phase in phases:  # list of inputs for parallelisation
-            sim_name = '{}_{:02}-{}'.format(
-                    sim_name_prefix, cosmology, phase)
-            path_p_lin = os.path.join(
-                prod_dir, sim_name+'_products', sim_name+'_power', 'info',
-                'camb_matterpower.dat')
+            # sim_name = '{}_{:02}-{}'.format(
+            #         sim_name_prefix, cosmology, phase)
+            path_p_lin = "/mnt/gosling1/bigsim_products/" \
+                "AbacusCosmos_1100box_planck_products/" \
+                "AbacusCosmos_1100box_planck_00-0_products/" \
+                "AbacusCosmos_1100box_planck_00-0_power/" \
+                "info/camb_matterpower.dat"
+            # path_p_lin = os.path.join(
+            #     prod_dir, sim_name+'_products', sim_name+'_power', 'info',
+            #     'camb_matterpower.dat')
             path_xi_0 = os.path.join(
                 indir,
                 '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
@@ -1174,9 +1186,9 @@ class FitterCache:
             path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
             path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
             list_of_inputs.append(
-                [redshift, recon, self.polydeg, self.rmin, beta,
-                 r_rescale_factor, path_p_lin, path_xi_0, path_xi_2, path_cov,
-                 path_cg, path_ct])
+                [redshift, recon, self.real_space, self.polydeg, self.rmin,
+                 beta, r_rescale_factor, path_p_lin, path_xi_0, path_xi_2,
+                 path_cov, path_cg, path_ct])
             # path_matter = os.path.join(
             #     store_dir, sim_name_prefix+'-mmatter',
             #     '2Dbaofits_poly3_rmin_50',
@@ -1184,7 +1196,7 @@ class FitterCache:
             # chisq_table = np.loadtxt(path_matter)
             # ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
             # alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
-        with closing(MyPool(processes=len(list_of_inputs),
+        with closing(MyPool(processes=18,
                             maxtasksperchild=1)) as p:
             ret = p.map(baofit, list_of_inputs)
         p.close()
@@ -1206,26 +1218,26 @@ class FitterCache:
 def optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
                     brute=True):
 
-    betap = np.arange(0.0000, 0.0050, 0.0010)
-    r_res = np.arange(1.0019, 1.0028, 0.0001)
     cache = FitterCache(model_name, recon_type)
     if brute:
+        betap = np.arange(0.0000, 0.001, 0.0005)
+        r_res = np.array([1])
         grid = np.zeros((betap.size, r_res.size))
         table = []
         for i, j in product(range(betap.size), range(r_res.size)):
             print('Brute progress currently: {}/{}'
-                  .format(i*betap.size)+j+1, betap.size*r_res.size)
+                  .format(i*betap.size+j+1, betap.size*r_res.size))
             grid[i, j] = cache.baofit_parallel((betap[i], r_res[j]))
             table.append([betap[i]*100, r_res[j], grid[i, j]])
         np.savetxt(os.path.join(save_dir, 'brute_grid.txt'), grid)
         np.savetxt(os.path.join(save_dir, 'brute_table.txt'), np.array(table))
     else:
-        beta, r_rescale_factor = 0.20, 1.001
-        bounds = ((0, 0.0005), (1, 1.0020))
+        beta, r_rescale_factor = 0, 0.997
+        bounds = ((0, 0.0005), (0.9966, 0.9978))
         ret = optimize.minimize(
             cache.baofit_parallel, (beta/100, r_rescale_factor),
             bounds=bounds, method='SLSQP',
-            options={'ftol': 5e-06, 'eps': 8e-4, 'maxiter': 6, 'disp': True})
+            options={'ftol': 5e-06, 'eps': 1e-4, 'maxiter': 6, 'disp': True})
         if ret.success:
             print('Best parameters: beta = {}, r_rescale_factor = {})'
                   .format(ret.x[0]*100, ret.x[1]))
@@ -1264,24 +1276,26 @@ if __name__ == "__main__":
                                     maxtasksperchild=1)) as p:
                     p.map(partial(
                             do_realisation, phase=phase, model_name=model_name,
-                            overwrite=True,
+                            overwrite=False,
                             do_pre_auto_smu=False, do_pre_auto_rppi=False,
-                            do_pre_auto_fft=False, do_pre_cross=False,
-                            do_recon_std=True, do_post_auto_rppi=False,
-                            do_post_cross=True, do_recon_ite=False,
+                            do_pre_auto_fft=True, do_pre_cross=True,
+                            do_recon_std=False, do_post_auto_rppi=False,
+                            do_post_cross=False, do_recon_ite=False,
                             do_pre_auto_corr=False, do_post_auto_corr=False,
-                            do_pre_cross_corr=False, do_post_cross_corr=True),
+                            do_pre_cross_corr=True, do_post_cross_corr=False),
                           reals)
                     p.close()
                     p.join()
                 print('---\nPool closed cleanly for model {}.\n---'
                       .format(model_name))
-            with closing(MyPool(processes=len(model_names),
-                                maxtasksperchild=1)) as p:
-                p.map(partial(coadd_realisations, phase=phase, reals=reals),
-                      model_names)
-                p.close()
-                p.join()
+    if do_coadd:
+#        for phase in phases:
+#            with closing(MyPool(processes=len(model_names),
+#                                maxtasksperchild=1)) as p:
+#                p.map(partial(coadd_realisations, phase=phase, reals=reals),
+#                      model_names)
+#                p.close()
+#                p.join()
         # combine_galaxy_table_metadata(phases)
         with closing(MyPool(processes=len(model_names),
                             maxtasksperchild=1)) as p:
@@ -1292,17 +1306,20 @@ if __name__ == "__main__":
     if do_optimise_fitter:
         # for recon in ['post-recon-std', 'post-recon-ite']:
         optimise_fitter(model_name='gen_base1', recon_type='post-recon-std',
-                        brute=True)
+                        brute=False)
     if do_fit:
         for model_name in model_names:
             '''
             best-fit parameters for 16-box sim:
             real-sapce matter: beta = 0.00, r_rescale_factor = 1.00174
-            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00252
-            *** real-space galaxy: beta = 0.00, r_rescale_factor = 1.00180 ***
+            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
 
             best-fit parameters for 20-box sim:
             real-sapce matter: beta = 0.00, r_rescale_factor = 0.99843
-            redshift-space ga: beta = 0.00, r_rescale_factor = 0.9984, 0.0191
+            redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
+
+            we expect a 0.2% shift due to nonlinear evolution when fitting with
+            a linear power spectrum, no need to fiddle with r-rescaling
             '''
-            cache = FitterCache(0, 1.00166, model_name, 'post-recon-std')
+            cache = FitterCache(model_name, 'post-recon-std', real_space=True,
+                                beta=0, rmin=50)

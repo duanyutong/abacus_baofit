@@ -124,10 +124,10 @@ class PowerTemplate:
             assert P_lin.size == P_nw.size
         except AssertionError:
             print('P shapes are', P_lin.shape, P_nw.shape)
-        Sigma_s = 4  # 4 Mpc/h
-        Sigma_r = 15  # 15 Mpc/h
+        Sigma_s = 4  # 4 Mpc/h, streaming scale
+        Sigma_r = 15  # 15 Mpc/h, smoothing scale used in reconstruction
         if self.reconstructed:
-            Sigma_perp = 0.1  # 2.5 Mpc/h, the smaller, the sharper BAO peak
+            Sigma_perp = 0  # 2.5 Mpc/h, the smaller, the sharper BAO peak
             # Sigma_para = 4  # Mpc/h
         else:
             Sigma_perp = 6  # 6 Mpc/h

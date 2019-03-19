@@ -35,7 +35,7 @@ def matmul(*args):
 class baofit3D:
 
     def __init__(self, z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta,
-                 reconstructed, r_min=50, r_max=150,
+                 reconstructed, real_space=False, r_min=50, r_max=150,
                  xi_temp_weighted=False, xi_temp_rescale=1):
 
         power = PowerTemplate(z=z, reconstructed=reconstructed)
@@ -44,6 +44,7 @@ class baofit3D:
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
                 r, power.xi_multipole(r, ell=ell))
+        self.real_space = real_space
         self.polydeg = polydeg
         self.xi_temp_weighted = xi_temp_weighted
         self.xi_temp_rescale = xi_temp_rescale
@@ -155,7 +156,6 @@ class baofit3D:
         return ximod0, ximod2
 
     def calculate_chisq(self, B0, B2):
-        ''' input Bs is a tuple of two B coefficients '''
         if B0 < 0 or B2 < 0:
             return chisq_min
         dxi = self.dv - self.mv  # delta xi vector between data and model
@@ -177,20 +177,22 @@ class baofit3D:
         return self.calculate_chisq(B0, B2)
 
     def chisq_scan(self,
-                   armin=0.990, armax=1.005, arsp=0.0006,
-                   atmin=0.995, atmax=1.006, atsp=0.0006):
+                   armin=0.990, armax=1.010, arsp=0.0002,
+                   atmin=0.990, atmax=1.010, atsp=0.0002):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006
         '''
         ars = np.arange(armin, armax, arsp)
         ats = np.arange(atmin, atmax, atsp)
-        chisq_grid = np.zeros((ars.size, ats.size))
+        chisq_grid = np.zeros((ars.size, ats.size))  # default value is 0
         B0_grid = np.zeros(chisq_grid.shape)
         B2_grid = np.zeros(chisq_grid.shape)
         chisq_list = []
         print('\nChi-square grid scan size', chisq_grid.size)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
+            if self.real_space and ars[i] != ats[j]:
+                continue
             self.ar = ars[i]
             self.at = ats[j]
             self.xitemp = self.make_xi_temp()
@@ -202,7 +204,9 @@ class baofit3D:
             B0_grid[i, j], B2_grid[i, j] = ret.x[0], ret.x[1]
             chisq_list.append([ars[i], ats[j], ret.fun])
             # print('B0, B2, A:', B0, B2, self.A)
-        i, j = np.unravel_index(np.argmin(chisq_grid), chisq_grid.shape)
+        valid_idx = np.where(chisq_grid > 0)  # np.where returns a tuple
+        i = valid_idx[0][chisq_grid[valid_idx].argmin()]
+        j = valid_idx[1][chisq_grid[valid_idx].argmin()]
         chisq_table = np.array(chisq_list)
         model_dump = self.model_dump(ars[i], ats[j], chisq_grid[i, j],
                                      B0_grid[i, j], B2_grid[i, j])
@@ -222,8 +226,8 @@ class baofit3D:
 
 def baofit(argv):
     try:
-        z, recon, polydeg, rmin, beta, r_rescale_factor, path_p_lin, \
-            path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
+        z, recon, real_space, polydeg, rmin, beta, r_rescale_factor, \
+            path_p_lin, path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
         print('Saving chisq:', os.path.dirname(path_cg))
         if not os.path.exists(os.path.dirname(path_cg)):
             try:
@@ -249,14 +253,14 @@ def baofit(argv):
             'NaN values in cov at: {}'.format(np.where(cov == np.nan)))
         # find best B_0 from bias prior, reduced range
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       r_min=rmin, r_max=150,
+                       real_space=real_space, r_min=rmin, r_max=150,
                        xi_temp_weighted=False, xi_temp_rescale=1)
         fit.xitemp = fit.make_xi_temp()
         # determine best-fit rescaling factor and target bias using xi_0
         xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
             fit.xitemp['0'].T, fit.xitemp['0'])
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       r_min=rmin, r_max=80,
+                       real_space=real_space, r_min=rmin, r_max=80,
                        xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
         fit.xitemp = fit.make_xi_temp()
         B0_list = np.arange(0.1, 2, 0.01)
