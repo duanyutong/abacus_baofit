@@ -26,13 +26,10 @@ def W(kR):
 
 class PowerTemplate:
 
-    def __init__(self, reconstructed=True, z=0.5,
-                 ombhsq=0.02222, omhsq=0.14212,
+    def __init__(self, z=0.5, ombhsq=0.02222, omhsq=0.14212,
                  sigma8=0.830, h=0.6726, ns=0.9652, Tcmb0=2.725):
-        # print('Power Temp is isotropic: ', isotropic)
         self.z = z
         self.h = h
-        self.reconstructed = reconstructed
         self.ombhsq = ombhsq  # Omega matter baryon
         self.omhsq = omhsq  # Omega matter (baryon + CDM)
         self.om = omhsq/np.square(h)
@@ -105,7 +102,8 @@ class PowerTemplate:
             np.power(k, self.ns) * np.square(Dlin_ratio)
         return Psmooth
 
-    def P(self, k_lin, P_lin, n_mu_bins, beta=0.4):
+    def P(self, k_lin, P_lin, n_mu_bins, beta=0, Sigma_s=4, Sigma_r=15,
+          Sigma_perp=0, Sigma_para=0):
         """
         This is the final power template from P_lin and P_nw
         including the C and exponential damping terms
@@ -124,15 +122,6 @@ class PowerTemplate:
             assert P_lin.size == P_nw.size
         except AssertionError:
             print('P shapes are', P_lin.shape, P_nw.shape)
-        Sigma_s = 4  # 4 Mpc/h, streaming scale
-        Sigma_r = 15  # 15 Mpc/h, smoothing scale used in reconstruction
-        if self.reconstructed:
-            Sigma_perp = 0  # 2.5 Mpc/h, the smaller, the sharper BAO peak
-            # Sigma_para = 4  # Mpc/h
-        else:
-            Sigma_perp = 6  # 6 Mpc/h
-            # Sigma_para = 10  # Mpc/h
-        Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
         sigmavsq = (1 - np.square(mu))*np.square(Sigma_perp)/2 \
             + np.square(mu*Sigma_para)/2  # BAO peak smoothing due to nonlinear
         S = np.exp(-np.square(k*Sigma_r)/2)

@@ -38,8 +38,18 @@ class baofit3D:
                  reconstructed, real_space=False, r_min=50, r_max=150,
                  xi_temp_weighted=False, xi_temp_rescale=1):
 
-        power = PowerTemplate(z=z, reconstructed=reconstructed)
-        power.P(k, P_lin, n_mu_bins, beta=beta)
+        power = PowerTemplate(z=z)
+        Sigma_s = 4  # 4 Mpc/h, streaming scale
+        Sigma_r = 15  # 15 Mpc/h, smoothing scale used in reconstruction
+        if reconstructed:
+            Sigma_perp = 0  # 2.5 Mpc/h, the smaller, the sharper BAO peak
+            # Sigma_para = 4  # Mpc/h
+        else:
+            Sigma_perp = 6  # 6 Mpc/h
+            # Sigma_para = 10  # Mpc/h
+        Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
+        power.P(k, P_lin, n_mu_bins, beta=beta, Sigma_s=Sigma_s,
+                Sigma_r=Sigma_r, Sigma_perp=Sigma_perp, Sigma_para=Sigma_para)
         self.xi_multipole = {}
         for ell in [0, 2, 4]:
             self.xi_multipole[ell] = InterpolatedUnivariateSpline(
@@ -166,7 +176,7 @@ class baofit3D:
         factor = (chisq_min-2*self.n) / (chisq_min-1)
         return factor * (chisq + B0_term + B2_term)
 
-    def B0_B2_optimize(self, Bs):
+    def B0_B2_optimize(self, Bs):  # function to be minimised by varying B0, B2
         B0, B2 = Bs
         self.A = np.zeros(6)  # assume zero A before taking diff solving for A
         self.make_model_vector(B0, B2)  # get model vector with 0 A
@@ -177,8 +187,8 @@ class baofit3D:
         return self.calculate_chisq(B0, B2)
 
     def chisq_scan(self,
-                   armin=0.990, armax=1.010, arsp=0.0002,
-                   atmin=0.990, atmax=1.010, atsp=0.0002):
+                   armin=0.990, armax=1.010, arsp=0.0001,
+                   atmin=0.990, atmax=1.010, atsp=0.0001):
         '''
         armin=0.988, armax=1.012, arsp=0.0006
         atmin=0.989, atmax=1.011, atsp=0.0006
@@ -190,6 +200,7 @@ class baofit3D:
         B2_grid = np.zeros(chisq_grid.shape)
         chisq_list = []
         print('\nChi-square grid scan size', chisq_grid.size)
+        print('realspace:', self.real_space)
         for i, j in tqdm(product(range(ars.size), range(ats.size))):
             if self.real_space and ars[i] != ats[j]:
                 continue
@@ -218,10 +229,11 @@ class baofit3D:
         self.xitemp = self.make_xi_temp()
         chisq = self.B0_B2_optimize((B0, B2))  # this sets A hat coefficients
         assert chisq == chisq_min
-        r_full = np.arange(1, 151)
+        r_full = np.arange(1, 151, 1)  # debug
         self.xitemp = self.make_xi_temp(r0=r_full)
         ximod0, ximod2 = self.make_model_vector(B0, B2, r0=r_full)
-        return np.array([r_full, ximod0, ximod2]).T
+        return np.array([r_full, ximod0, ximod2,
+                         self.xitemp['0'], self.xitemp['2']]).T
 
 
 def baofit(argv):
@@ -229,6 +241,7 @@ def baofit(argv):
         z, recon, real_space, polydeg, rmin, beta, r_rescale_factor, \
             path_p_lin, path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
         print('Saving chisq:', os.path.dirname(path_cg))
+        print('baofit real-space', real_space)
         if not os.path.exists(os.path.dirname(path_cg)):
             try:
                 os.mkdir(os.path.dirname(path_cg))
@@ -274,8 +287,8 @@ def baofit(argv):
              .format(B0_list[np.argmin(chisq)], chisq.min()))
         # update prior and do chisq grid scan, full range
         fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       r_min=rmin, r_max=150,
-                       xi_temp_weighted=True, xi_temp_rescale=xi_temp_rescale)
+                       real_space=real_space, r_min=rmin, r_max=150,
+                       xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
         fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit.B0_ln_width = 0.4
         fit.B2_ln_width = 0.4

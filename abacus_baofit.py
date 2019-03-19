@@ -58,7 +58,7 @@ model_names = ['matter']
 reals = range(1)  # range(12)
 N_threads = 24  # number of threads for a single realisation
 do_create = False
-do_coadd = True
+do_coadd = False
 do_optimise_fitter = False
 do_fit = True
 
@@ -884,31 +884,22 @@ def do_realisation(r, phase, model_name, overwrite=False,
         raise E
 
 
+recon_types = ['pre-recon', 'post-recon-std']  # 'post-recon'ite'
 coadd_filenames = [  # coadd_realisations, change this for iterative recon
 #    '-auto-xi-smu-pre-recon-ar',
 #    '-auto-xi_0-smu-pre-recon-ar', '-auto-xi_2-smu-pre-recon-ar',
 #    '-auto-xi-rppi-pre-recon-ar', '-auto-xi-rppi-post-recon-std-sr',
 #    '-auto-wp-rppi-pre-recon-ar', '-auto-wp-rppi-post-recon-std-sr',
-#    '-auto-fftcorr_xi_0-pre-recon-15.0_hmpc',
-#    '-auto-fftcorr_xi_2-pre-recon-15.0_hmpc',
-    '-auto-fftcorr_xi_0-post-recon-std-15.0_hmpc',
-    '-auto-fftcorr_xi_2-post-recon-std-15.0_hmpc'
-#    '-auto-fftcorr_xi_0-post-recon-ite-15.0_hmpc',
-#    '-auto-fftcorr_xi_2-post-recon-ite-15.0_hmpc',
 ]  # exclude iterative reconstruction for fitter test with baseline HOD
+for recon_type in recon_types:
+    coadd_filenames = coadd_filenames + [
+        '-auto-fftcorr_xi_0-{}-15.0_hmpc'.format(recon_type),
+        '-auto-fftcorr_xi_2-{}-15.0_hmpc'.format(recon_type)]
 fft = ['fftcorr' in fn for fn in coadd_filenames].index(True)
 
 
 def coadd_realisations(model_name, phase, reals):
 
-    fft_filenames = [
-#        'fftcorr_N-pre-recon-15.0_hmpc',
-#        'fftcorr_R-pre-recon-15.0_hmpc',
-        'fftcorr_N-post-recon-std-15.0_hmpc',
-        'fftcorr_R-post-recon-std-15.0_hmpc'
-#        'fftcorr_N-post-recon-ite-15.0_hmpc',
-#        'fftcorr_R-post-recon-ite-15.0_hmpc']
-    ]
     try:
         # Co-add auto-correlation results from all realisations
         sim_name = '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase)
@@ -919,31 +910,32 @@ def coadd_realisations(model_name, phase, reals):
             except OSError:
                 assert os.path.exists(filedir)
         # convert N, R counts to correlations for each realisation
-        print('Converting recon N, R to multipoles for phase {}, model {}...'
+        print('Converting fftcorr N, R to multipoles for phase {}, model {}...'
               .format(phase, model_name))
         if model_name == 'matter':  # simply copy
             bias = 1
         else:
             bias = galaxy_bias
-        for r, i in product(reals, range(int(len(fft_filenames)/2))):
+        for r, i in product(reals, range(len(recon_types))):
+            recon_type = recon_types[i]
             realdir = os.path.join(
                 save_dir,
                 '{}_{:02}-{}'.format(sim_name_prefix, cosmology, phase),
                 'z{}-r{}'.format(redshift, r))
-            pathD = os.path.join(
-                realdir,
-                '{}-auto-{}.txt'.format(model_name, fft_filenames[2*i]))
-            pathR = os.path.join(
-                realdir,
-                '{}-auto-{}.txt'.format(model_name, fft_filenames[2*i+1]))
-            N, R = np.loadtxt(pathD), np.loadtxt(pathR)
+            pathN = os.path.join(realdir,
+                                 '{}-auto-fftcorr_N-{}-15.0_hmpc.txt'
+                                 .format(model_name, recon_type))
+            pathR = os.path.join(realdir,
+                                 '{}-auto-fftcorr_R-{}-15.0_hmpc.txt'
+                                 .format(model_name, recon_type))
+            N, R = np.loadtxt(pathN), np.loadtxt(pathR)
             assert np.all(N[:, 1] == R[:, 1])
             r = N[:, 1]
             xi_0 = N[:, 3] / R[:, 3] * np.square(bias)
             xi_2 = N[:, 4] / R[:, 3] * np.square(bias)
             xi_0_txt = np.vstack([r, xi_0]).T
             xi_2_txt = np.vstack([r, xi_2]).T
-            tag = fft_filenames[2*i][10:]
+            tag = recon_type + '-15.0_hmpc'
             for ell, xi_ell in zip([0, 2], [xi_0_txt, xi_2_txt]):
                 np.savetxt(os.path.join(realdir,
                                         '{}-auto-fftcorr_xi_{}-{}.txt'
@@ -957,16 +949,21 @@ def coadd_realisations(model_name, phase, reals):
                                    os.path.basename(src)).replace(
                                            '.txt', '-coadd.txt')
                 copyfile(src, dst)
-        print('Coadding x-corr for {} realisations, phase {}, model {}...'
+        print('Phase {}, model {}: coadding x-corr for {} realisations...'
               .format(len(reals), phase, model_name))
-        coadd_fl = []
-        for fn in [
-#                    '-cross_{}-xi-smu-pre-recon-ar',
+        cross_temps = []
+        if 'pre-recon' in recon_types:
+            cross_temps = cross_temps + [
+                '-cross_{}-xi-smu-pre-recon-ar',
+                '-cross_{}-xi_0-smu-pre-recon-ar',
+                '-cross_{}-xi_2-smu-pre-recon-ar']
+        if 'post-recon-std' in recon_types:
+            cross_temps = cross_temps + [
                 '-cross_{}-xi-smu-post-recon-std-sr',
-#                    '-cross_{}-xi_0-smu-pre-recon-ar',
                 '-cross_{}-xi_0-smu-post-recon-std-sr',
-#                    '-cross_{}-xi_2-smu-pre-recon-ar',
-                '-cross_{}-xi_2-smu-post-recon-std-sr']:
+                '-cross_{}-xi_2-smu-post-recon-std-sr']
+        coadd_fl = []
+        for fn in cross_temps:
             for i in range(N_sub**3):
                 coadd_fl.append(fn.format(i))
         coadd_fl = coadd_fl + coadd_filenames
@@ -1047,15 +1044,14 @@ def coadd_phases(model_name):
 def do_cov(model_name):
 
     # calculate monoquad cov for baofit from co-added xi for each phase box
-    rec_types = [
-        # 'smu-pre-recon',
-        'smu-post-recon-std']
-    rand_types = [
-        # 'ar',
-        'sr']
-    for rec, rand in zip(rec_types, rand_types):
+    rand_types = []
+    if 'pre-recon' in recon_types:
+        rand_types = rand_types + ['ar']
+    if 'post-recon-std' in recon_types:
+        rand_types = rand_types + ['sr']
+    for rec, rand in zip(recon_types, rand_types):
         tmp = save_dir + (
-            '/{0}_{1:02}-[0-9]*/z{2}/{3}-cross_*-xi_{4}*{5}*{6}-coadd.txt'
+            '/{0}_{1:02}-[0-9]*/z{2}/{3}-cross_*-xi_{4}*smu*{5}*{6}-coadd.txt'
             .format(sim_name_prefix, cosmology, redshift, model_name,
                     '{}', rec, rand))
         paths0 = sorted(glob(tmp.format(0)))
@@ -1196,18 +1192,19 @@ class FitterCache:
             # chisq_table = np.loadtxt(path_matter)
             # ar, at, _ = chisq_table[np.argmin(chisq_table[:, 2]), :]
             # alpha['mat']['r'][phase], alpha['mat']['t'][phase] = ar, at
-        with closing(MyPool(processes=18,
-                            maxtasksperchild=1)) as p:
-            ret = p.map(baofit, list_of_inputs)
+        ret = [baofit(list_of_inputs[0])]  # debug
+#        with closing(MyPool(processes=18,
+#                            maxtasksperchild=1)) as p:
+#            ret = p.map(baofit, list_of_inputs)
         p.close()
         p.join()
         alpha['gal'] = {'r': np.array([item[0] for item in ret]),
                         't': np.array([item[1] for item in ret])}
-        aiso = np.power(alpha['gal']['r'], 1/3) \
-            * np.power(alpha['gal']['t'], 2/3)
+        # aiso = np.power(alpha['gal']['r'], 1/3) \
+        #     * np.power(alpha['gal']['t'], 2/3)
         if beta not in self.results.keys():
             self.results[beta] = {}
-        res = self.results[beta][r_rescale_factor] = np.linalg.norm(aiso - 1) \
+        res = self.results[beta][r_rescale_factor] = \
             + np.linalg.norm(alpha['gal']['r']-1) * 1/3 \
             + np.linalg.norm(alpha['gal']['t']-1) * 2/3
         print('Returning new result to optimiser: {}, {}, {}'
@@ -1289,13 +1286,13 @@ if __name__ == "__main__":
                 print('---\nPool closed cleanly for model {}.\n---'
                       .format(model_name))
     if do_coadd:
-#        for phase in phases:
-#            with closing(MyPool(processes=len(model_names),
-#                                maxtasksperchild=1)) as p:
-#                p.map(partial(coadd_realisations, phase=phase, reals=reals),
-#                      model_names)
-#                p.close()
-#                p.join()
+        for phase in phases:
+            with closing(MyPool(processes=len(model_names),
+                                maxtasksperchild=1)) as p:
+                p.map(partial(coadd_realisations, phase=phase, reals=reals),
+                      model_names)
+                p.close()
+                p.join()
         # combine_galaxy_table_metadata(phases)
         with closing(MyPool(processes=len(model_names),
                             maxtasksperchild=1)) as p:
@@ -1322,4 +1319,4 @@ if __name__ == "__main__":
             a linear power spectrum, no need to fiddle with r-rescaling
             '''
             cache = FitterCache(model_name, 'post-recon-std', real_space=True,
-                                beta=0, rmin=50)
+                                beta=0, rmin=50, r_rescale_factor=1.0018)
