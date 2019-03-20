@@ -23,7 +23,7 @@ from tqdm import tqdm
 # bc = '.txt'  # bc = 'post_recon_bincent'+str(binc)+'.dat'
 # fout = ft
 n_mu_bins = 1000
-chisq_min = 1500
+chisq_min = 2000
 r_avg_increment = 1
 txtfmt = b'%.30e'
 
@@ -34,19 +34,24 @@ def matmul(*args):
 
 class baofit3D:
 
-    def __init__(self, z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta,
-                 reconstructed, force_isotropy=False, r_min=50, r_max=150,
-                 xi_temp_weighted=False, xi_temp_rescale=1):
+    def __init__(self, sample_type, z, k, P_lin, r, xi_0, xi_2, cov,
+                 polydeg, beta, reconstructed, force_isotropy=False,
+                 r_min=50, r_max=150, xi_temp_weighted=False,
+                 xi_temp_rescale=1):
 
         power = PowerTemplate(z=z)
         Sigma_s = 4  # 4 Mpc/h, streaming scale
-        Sigma_r = 5  # 15 Mpc/h, smoothing scale used in reconstruction
+        Sigma_r = 15  # 15 Mpc/h, smoothing scale used in reconstruction
         self.reconstructed = reconstructed
+        self.sample_type = sample_type
         if self.reconstructed:
             Sigma_perp = 0  # 2.5 Mpc/h, the smaller, the sharper BAO peak
             # Sigma_para = 4  # Mpc/h
         else:  # pre-recon peak is wider
-            Sigma_perp = 1.5  # 6 Mpc/h
+            if self.sample_type == 'mat':
+                Sigma_perp = 2  # 2 Mpc/h for matter, 5 Mpc/h for galaxies
+            elif self.sample_type == 'gal':
+                Sigma_perp = 5
             # Sigma_para = 10  # Mpc/h
         Sigma_para = Sigma_perp / (1 - beta)  # Mpc/h
         power.P(k, P_lin, n_mu_bins, beta=beta, Sigma_s=Sigma_s,
@@ -97,10 +102,11 @@ class baofit3D:
         self.B0_ln_width = 100
         self.B2_ln_width = 100
         self.A = np.zeros(6)
-#        print(('\nReconstructed: {}, force isotropy: {}, '
-#               'xitemp rescale factor: {:.2f}, data vector shape: {}')
-#              .format(reconstructed, force_isotropy, xi_temp_rescale,
-#                      self.dv.shape))
+        self.range_ok = False
+        print(('\nReconstructed: {}, force isotropy: {}, '
+               'xitemp rescale factor: {:.2f}, data vector shape: {}')
+              .format(reconstructed, force_isotropy, xi_temp_rescale,
+                      self.dv.shape))
 
     def xi_r_mu(self, r, mu, ell_max=6):
         ''' input r may be 2D, return 2D xi_r_mu(r, mu) '''
@@ -190,15 +196,36 @@ class baofit3D:
 
     def chisq_scan(self):
         '''
-        armin=0.988, armax=1.012, arsp=0.0006
-        atmin=0.989, atmax=1.011, atsp=0.0006
+        matter pre-recon:
+                ars = np.arange(1.0060, 1.0120, 0.00005)
+                ats = np.arange(0.9970, 1.0020, 0.00005)
+
+        matter post-recon:
+                ars = np.arange(0.9960, 1.0000, 0.00005)
+                ats = np.arange(0.9990, 1.0010, 0.00005)
+
+        galaxy pre-recon:
+                ars = np.arange(0.9980, 1.0170, 0.0001)
+                ats = np.arange(1.0020, 1.0190, 0.0001)
+
+        galaxy post-recon:
+                ars = np.arange(0.9900, 1.0040, 0.0001)
+                ats = np.arange(0.9950, 1.0005, 0.0001)
         '''
-        if self.reconstructed:
-            ars = np.arange(0.9960, 1.0000, 0.0001)
-            ats = np.arange(0.9990, 1.0010, 0.0001)
-        else:
-            ars = np.arange(1.0060, 1.0120, 0.0001)
-            ats = np.arange(0.9970, 1.0020, 0.0001)
+        if self.sample_type == 'mat':
+            if not self.reconstructed:  # pre-recon
+                ars = np.arange(1.0060, 1.0120, 0.00005)
+                ats = np.arange(0.9970, 1.0020, 0.00005)
+            else:  # post=recon
+                ars = np.arange(0.9960, 1.0000, 0.00005)
+                ats = np.arange(0.9990, 1.0010, 0.00005)
+        elif self.sample_type == 'gal':
+            if not self.reconstructed:  # pre-recon
+                ars = np.arange(0.9980, 1.0170, 0.0001)
+                ats = np.arange(1.0020, 1.0190, 0.0001)
+            else:  # post-recon
+                ars = np.arange(0.9900, 1.0040, 0.0001)
+                ats = np.arange(0.9950, 1.0005, 0.0001)
         chisq_grid = np.zeros((ars.size, ats.size))  # default value is 0
         B0_grid = np.zeros(chisq_grid.shape)
         B2_grid = np.zeros(chisq_grid.shape)
@@ -224,6 +251,8 @@ class baofit3D:
         chisq_table = np.array(chisq_list)
         model_dump = self.model_dump(ars[i], ats[j], chisq_grid[i, j],
                                      B0_grid[i, j], B2_grid[i, j])
+        if ars.min() < ars[i] < ars.max() and ats.min() < ats[j] < ats.max():
+            self.range_ok = True  # must be strictly unequal to be within range
         return chisq_grid, chisq_table, model_dump
 
     def model_dump(self, ar, at, chisq_min, B0, B2):
@@ -241,8 +270,8 @@ class baofit3D:
 
 def baofit(argv):
     try:
-        z, recon, force_isotropy, polydeg, rmin, beta, path_p_lin, \
-            path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
+        sample_type, z, recon, force_isotropy, polydeg, rmin, beta, \
+            path_p_lin, path_xi_0, path_xi_2, path_cov, path_cg, path_ct = argv
         print('Saving chisq:', os.path.dirname(path_cg))
         if not os.path.exists(os.path.dirname(path_cg)):
             try:
@@ -267,16 +296,18 @@ def baofit(argv):
         assert not np.any(cov == np.nan), (
             'NaN values in cov at: {}'.format(np.where(cov == np.nan)))
         # find best B_0 from bias prior, reduced range
-        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       force_isotropy=force_isotropy, r_min=rmin, r_max=150,
-                       xi_temp_weighted=False, xi_temp_rescale=1)
+        fit = baofit3D(sample_type, z, k, P_lin, r, xi_0, xi_2, cov,
+                       polydeg, beta, recon, force_isotropy=force_isotropy,
+                       r_min=rmin, r_max=150, xi_temp_weighted=False,
+                       xi_temp_rescale=1)
         fit.xitemp = fit.make_xi_temp()
         # determine best-fit rescaling factor and target bias using xi_0
         xi_temp_rescale = matmul(fit.xitemp['0'].T, fit.xidata['0'])/matmul(
             fit.xitemp['0'].T, fit.xitemp['0'])
-        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       force_isotropy=force_isotropy, r_min=rmin, r_max=80,
-                       xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
+        fit = baofit3D(sample_type, z, k, P_lin, r, xi_0, xi_2, cov,
+                       polydeg, beta, recon, force_isotropy=force_isotropy,
+                       r_min=rmin, r_max=80, xi_temp_weighted=False,
+                       xi_temp_rescale=xi_temp_rescale)
         fit.xitemp = fit.make_xi_temp()
         B0_list = np.arange(0.1, 2, 0.01)
         chisq = np.zeros(B0_list.shape)
@@ -288,9 +319,10 @@ def baofit(argv):
             ('B0 = {} at lowest chisq = {} > chisq_min,'
              .format(B0_list[np.argmin(chisq)], chisq.min()))
         # update prior and do chisq grid scan, full range
-        fit = baofit3D(z, k, P_lin, r, xi_0, xi_2, cov, polydeg, beta, recon,
-                       force_isotropy=force_isotropy, r_min=rmin, r_max=150,
-                       xi_temp_weighted=False, xi_temp_rescale=xi_temp_rescale)
+        fit = baofit3D(sample_type, z, k, P_lin, r, xi_0, xi_2, cov,
+                       polydeg, beta, recon, force_isotropy=force_isotropy,
+                       r_min=rmin, r_max=150, xi_temp_weighted=True,
+                       xi_temp_rescale=xi_temp_rescale)
         fit.B0 = fit.B2 = B0_list[np.argmin(chisq)]  # new B0 prior for fit2
         fit.B0_ln_width = 0.4
         fit.B2_ln_width = 0.4
@@ -300,8 +332,8 @@ def baofit(argv):
         np.savetxt(path_cg.replace('chisq_grid.txt', 'xi_0_2_model.txt'),
                    model_dump, fmt=txtfmt)
         ar, at, chisq = chisq_table[np.argmin(chisq_table[:, 2]), :]
-        print('\nBest-fit ar, at, chisq: ({}, {}), {}'
-              .format(ar, at, chisq))
+        print('\nBest-fit ar, at, chisq: ({:.4f}, {:.4f}), {:.2f}, range OK:'
+              .format(ar, at, chisq, fit.range_ok))
         return ar, at
     except Exception as E:
         print('Exception caught in worker thread {}'.format(path_xi_0))

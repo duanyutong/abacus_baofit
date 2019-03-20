@@ -44,7 +44,7 @@ from baofit import baofit
 #tagout = '-mmatter'
 #phases = range(20)
 sim_name_prefix = 'joint_1100box_planck'
-tagout = '-mmatter'
+tagout = 'mmatter'
 phases = range(36)
 
 model_names = ['gen_base1', 'gen_base6', 'gen_base7',
@@ -1121,6 +1121,10 @@ class FitterCache:
         self.force_isotropy = force_isotropy
         self.results = {}  # initialise lookup dict results[beta][r_fac]
         self.baofit_parallel((beta, 1))  # pass beta prime
+        if 'matter' in model_name:
+            self.sample_type = 'mat'
+        else:
+            self.sample_type = 'gal'
 
     def baofit_parallel(self, parameters):
         # input beta and r_rescale factor (algways ignored)
@@ -1179,9 +1183,9 @@ class FitterCache:
             path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
             path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
             list_of_inputs.append(
-                [redshift, recon, self.force_isotropy, self.polydeg, self.rmin,
-                 beta, path_p_lin, path_xi_0, path_xi_2,
-                 path_cov, path_cg, path_ct])
+                [self.sample_type, redshift, recon, self.force_isotropy,
+                 self.polydeg, self.rmin, beta, path_p_lin,
+                 path_xi_0, path_xi_2, path_cov, path_cg, path_ct])
             # path_matter = os.path.join(
             #     store_dir, sim_name_prefix+'-mmatter',
             #     '2Dbaofits_poly3_rmin_50',
@@ -1214,13 +1218,13 @@ def optimise_fitter(model_name, recon_type, brute=True):
 
     cache = FitterCache(model_name, recon_type)
     if brute:
-        betas = np.arange(0, 0.5, 0.01)
+        betas = np.arange(0, 0.45, 0.01)
         errors = np.zeros(betas.size)
         for i, beta in enumerate(betas):
             print('Brute progress currently: {}/{}'.format(i, beta.size))
-            errors[i] = cache.baofit_parallel(beta)
+            errors[i] = cache.baofit_parallel((beta, 1))
         np.savetxt(os.path.join(save_dir, 'brute_beta.txt'),
-                   np.hstack(betas, errors).T, fmt=txtfmt)
+                   np.hstack([betas, errors]).T, fmt=txtfmt)
     else:
         beta = 0
         bounds = ((0, 0.5), (1, 1))
@@ -1291,28 +1295,29 @@ if __name__ == "__main__":
             p.close()
             p.join()
     if do_optimise_fitter:
-        # for recon in ['post-recon-std', 'post-recon-ite']:
-        for model_name in model_names:
-            optimise_fitter('matter', 'pre-recon', brute=False)
+        optimise_fitter('gen_base1', 'pre-recon', brute=True)
     if do_fit:
         for model_name in model_names:
-            for recon in recon_types:
-                '''
-                best-fit parameters for 16-box sim:
-                real-sapce matter: beta = 0.00, r_rescale_factor = 1.00174
-                redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
+            # for recon in recon_types:
+            '''
+            best-fit parameters for 16-box sim post-recon:
+            real-space matter: beta = 0.00, r_rescale_factor = 1.00174
+            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
 
-                best-fit parameters for 20-box sim:
-                real-space matter: beta = 0.00, r_rescale_factor = 0.99843
-                redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
+            best-fit parameters for 20-box sim post-recon:
+            real-space matter: beta = 0.00, r_rescale_factor = 0.99843
+            redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
 
-                we expect a 0.2% shift due to nonlinear evolutions when fitting
-                with a linear power spectrum which does not account for
-                nonlinear effects; no need to fiddle with r-rescaling
+            we expect a 0.2% shift due to nonlinear evolutions when fitting
+            with a linear power spectrum which does not account for
+            nonlinear effects; no need to fiddle with r-rescaling
 
-                best-fit parameters for 36-box joint set:
-                real-space matter: beta = 0.00
-                redshift-space ga: beta = 0.00 ?
-                '''
-                cache = FitterCache(model_name, recon,
-                                    force_isotropy=False, beta=0, rmin=50)
+            best-fit parameters for 36-box joint set:
+            real-space matter pre-/post-recon: beta = 0.00
+            redshift-space galaxy pre-recon:   beta = 0.00
+            (lower chisq 50 vs 80, a insensitive to beta to 0.2%, )
+            redshift-space galaxy post-recon:  beta = 0.00
+            '''
+            # model_name = 'gen_base1'
+            cache = FitterCache(model_name, 'pre-recon',
+                                force_isotropy=False, beta=0, rmin=50)
