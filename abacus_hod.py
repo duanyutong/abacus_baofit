@@ -342,8 +342,14 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir', perihelion=False,
     norm = np.linalg.norm(r_rel, axis=1)
     norm = norm.reshape(len(norm), 1)  # reshape it into a column vector
     r_rel_hat = r_rel / norm  # unit vector in the relative/radial direction
-    # dot product (radial component of peculiar speed) could be negative
-    pt['v_rad'] = np.abs(np.sum(np.multiply(pt['v_pec'] , r_rel_hat), axis=1))
+    # dot product (radial component of peculiar speed), could be negative
+    # positive is away from halo centre, negative is toward halo centre
+    pt['v_rad'] = np.sum(np.multiply(v_pec, r_rel_hat), axis=1)
+    # single precision produces anomaly where the radial component
+    # is larger than the full peculiar speed
+    # need to fix this before solving for tangential speed component
+    mask = np.abs(pt['v_rad']) > pt['v_pec']  # select the wrong rows
+    pt['v_rad'][mask] = pt['v_pec'][mask]*np.sign(pt['v_rad'][mask])
     pt['v_tan'] = np.sqrt(np.square(pt['v_pec']) - np.square(pt['v_rad']))
     # calculate perihelion distance for bias s_p, note h factors
     if perihelion:
