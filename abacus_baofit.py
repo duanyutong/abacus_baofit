@@ -37,15 +37,15 @@ from baofit import baofit
 
 # %% custom settings
 
-#sim_name_prefix = 'emulator_1100box_planck'
-#tagout = '-mmatter'  # 'norsd'  # '# 'matter'  # 'z0.5'
-#phases = range(16)  # range(16)  # [0, 1] # list(range(16))
-#sim_name_prefix = 'AbacusCosmos_1100box_planck'
-#tagout = '-mmatter'
-#phases = range(20)
-sim_name_prefix = 'joint_1100box_planck'
-tagout = 'mmatter'
-phases = range(36)
+# sim_name_prefix = 'emulator_1100box_planck'
+# tagout = '-recon'  # 'norsd'  # '# 'matter'  # 'z0.5'
+# phases = range(16) # range(16)  # [0, 1] # list(range(16))
+sim_name_prefix = 'AbacusCosmos_1100box_planck'
+tagout = ''
+phases = range(20)
+# sim_name_prefix = 'joint_1100box_planck'
+# tagout = ''
+# phases = range(36)
 
 model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_ass1',  'gen_ass1_n',
@@ -54,13 +54,13 @@ model_names = ['gen_base1', 'gen_base6', 'gen_base7',
                'gen_s1',    'gen_s1_n',
                'gen_sv1',   'gen_sv1_n',
                'gen_sp1',   'gen_sp1_n']
-model_names = ['matter']
-reals = range(1)  # range(12)
+model_names = ['gen_base6', 'gen_base7']
+reals = range(12)
 N_threads = 24  # number of threads for a single realisation
-do_create = False
-do_coadd = False
+do_create = True
+do_coadd = True
 do_optimise_fitter = False
-do_fit = True
+do_fit = False
 
 cosmology = 0  # one cosmology at a time instead of 'all'
 redshift = 0.5  # one redshift at a time instead of 'all'
@@ -74,7 +74,7 @@ matter_subsample_fraction = 0.002
 
 # %% flags
 save_hod_realisation = True
-use_rsd = False
+use_rsd = True
 
 # %% bin settings
 step_s_bins = 5  # mpc/h, bins for fitting
@@ -884,12 +884,12 @@ def do_realisation(r, phase, model_name, overwrite=False,
         raise E
 
 
-recon_types = ['pre-recon', 'post-recon-std']  # 'post-recon'ite'
+recon_types = ['pre-recon', 'post-recon-std', 'post-recon-ite']
 coadd_filenames = [  # coadd_realisations, change this for iterative recon
-#    '-auto-xi-smu-pre-recon-ar',
-#    '-auto-xi_0-smu-pre-recon-ar', '-auto-xi_2-smu-pre-recon-ar',
-#    '-auto-xi-rppi-pre-recon-ar', '-auto-xi-rppi-post-recon-std-sr',
-#    '-auto-wp-rppi-pre-recon-ar', '-auto-wp-rppi-post-recon-std-sr',
+    '-auto-xi-smu-pre-recon-ar',
+    '-auto-xi_0-smu-pre-recon-ar', '-auto-xi_2-smu-pre-recon-ar',
+    '-auto-xi-rppi-pre-recon-ar', '-auto-xi-rppi-post-recon-std-sr',
+    '-auto-wp-rppi-pre-recon-ar', '-auto-wp-rppi-post-recon-std-sr',
 ]  # exclude iterative reconstruction for fitter test with baseline HOD
 for recon_type in recon_types:
     coadd_filenames = coadd_filenames + [
@@ -1110,7 +1110,7 @@ def combine_galaxy_table_metadata(phases):
 class FitterCache:
 
     def __init__(self, model_name, recon_type, force_isotropy=False,
-                 beta=0, rmin=50, r_rescale_factor=1):
+                 beta=0, rmin=50, r_rescale_factor=1, jk=True):
         '''
         input parameters are: (beta, r_rescale_factor)
         '''
@@ -1119,12 +1119,16 @@ class FitterCache:
         self.model_name = model_name
         self.recon_type = recon_type
         self.force_isotropy = force_isotropy
+        self.jk = jk
         self.results = {}  # initialise lookup dict results[beta][r_fac]
-        self.baofit_parallel((beta, 1))  # pass beta prime
+        print('model_name', model_name)
         if 'matter' in model_name:
             self.sample_type = 'mat'
+            print('setting sample type mat')
         else:
             self.sample_type = 'gal'
+            print('setting sample type gal')
+        self.baofit_parallel((beta, 1))
 
     def baofit_parallel(self, parameters):
         # input beta and r_rescale factor (algways ignored)
@@ -1148,25 +1152,54 @@ class FitterCache:
         alpha = {}
         alpha['mat'] = {'r': np.zeros(len(phases)),
                         't': np.zeros(len(phases))}
-        for phase in phases:  # list of inputs for parallelisation
-            # sim_name = '{}_{:02}-{}'.format(
-            #         sim_name_prefix, cosmology, phase)
-            path_p_lin = "/mnt/gosling1/bigsim_products/" \
-                "AbacusCosmos_1100box_planck_products/" \
-                "AbacusCosmos_1100box_planck_00-0_products/" \
-                "AbacusCosmos_1100box_planck_00-0_power/" \
-                "info/camb_matterpower.dat"
-            # path_p_lin = os.path.join(
-            #     prod_dir, sim_name+'_products', sim_name+'_power', 'info',
-            #     'camb_matterpower.dat')
+        path_p_lin = "/mnt/gosling1/bigsim_products/" \
+            "AbacusCosmos_1100box_planck_products/" \
+            "AbacusCosmos_1100box_planck_00-0_products/" \
+            "AbacusCosmos_1100box_planck_00-0_power/" \
+            "info/camb_matterpower.dat"
+        # path_p_lin = os.path.join(
+        #     prod_dir, sim_name+'_products', sim_name+'_power',
+        #     'info', 'camb_matterpower.dat')
+        if self.jk:  # all jackknife samples for all phases
+            for phase in phases:  # list of inputs for parallelisation
+                # sim_name = '{}_{:02}-{}'.format(
+                #         sim_name_prefix, cosmology, phase)
+                path_xi_0 = os.path.join(
+                    indir,
+                    '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
+                    .format(self.model_name, xi_type, phase))
+                path_xi_2 = os.path.join(
+                    indir,
+                    '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
+                    .format(self.model_name, xi_type, phase))
+                if 'pre-recon' in xi_type:
+                    recon = False
+                    path_cov = os.path.join(
+                        indir,
+                        '{}-cross-xi_monoquad-cov-smu-pre-recon-ar.txt'
+                        .format(self.model_name))
+                elif 'post-recon' in xi_type:
+                    recon = True
+                    path_cov = os.path.join(
+                        indir,
+                        '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
+                        .format(self.model_name))
+                fout_tag = '{}-{}-{}'.format(self.model_name, phase, xi_type)
+                path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
+                path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
+                list_of_inputs.append(
+                    [self.sample_type, redshift, recon, self.force_isotropy,
+                     self.polydeg, self.rmin, beta, path_p_lin,
+                     path_xi_0, path_xi_2, path_cov, path_cg, path_ct])
+        else:
             path_xi_0 = os.path.join(
                 indir,
-                '{}-auto-fftcorr_xi_0-{}-jackknife_{}-coadd.txt'
-                .format(self.model_name, xi_type, phase))
+                '{}-auto-fftcorr_xi_0-{}-coadd.txt'
+                .format(self.model_name, xi_type))
             path_xi_2 = os.path.join(
                 indir,
-                '{}-auto-fftcorr_xi_2-{}-jackknife_{}-coadd.txt'
-                .format(self.model_name, xi_type, phase))
+                '{}-auto-fftcorr_xi_2-{}-coadd.txt'
+                .format(self.model_name, xi_type))
             if 'pre-recon' in xi_type:
                 recon = False
                 path_cov = os.path.join(
@@ -1179,7 +1212,7 @@ class FitterCache:
                     indir,
                     '{}-cross-xi_monoquad-cov-smu-post-recon-std-sr.txt'
                     .format(self.model_name))
-            fout_tag = '{}-{}-{}'.format(self.model_name, phase, xi_type)
+            fout_tag = '{}-{}'.format(self.model_name, xi_type)
             path_cg = os.path.join(outdir, fout_tag+'-chisq_grid.txt')
             path_ct = os.path.join(outdir, fout_tag+'-chisq_table.txt')
             list_of_inputs.append(
@@ -1251,6 +1284,7 @@ if __name__ == "__main__":
                 halocat = make_halocat(phase, halo_type='FoF')
                 print('\nSkipping halocat processing, matter field...')
             else:
+                halocat = make_halocat(phase, halo_type='Rockstar')
                 halocat = process_rockstar_halocat(halocat, N_cut=N_cut)
             for model_name in model_names:
                 print('---\nWorking on {} realisations, phase {}, model {}...'
@@ -1259,7 +1293,7 @@ if __name__ == "__main__":
                                     maxtasksperchild=1)) as p:
                     p.map(partial(do_galaxy_table,
                                   phase=phase, model_name=model_name,
-                                  overwrite=False),
+                                  overwrite=True),
                           reals)
                     p.close()
                     p.join()
@@ -1267,13 +1301,13 @@ if __name__ == "__main__":
                                     maxtasksperchild=1)) as p:
                     p.map(partial(
                             do_realisation, phase=phase, model_name=model_name,
-                            overwrite=False,
-                            do_pre_auto_smu=False, do_pre_auto_rppi=False,
+                            overwrite=True,
+                            do_pre_auto_smu=True, do_pre_auto_rppi=True,
                             do_pre_auto_fft=True, do_pre_cross=True,
-                            do_recon_std=False, do_post_auto_rppi=False,
-                            do_post_cross=False, do_recon_ite=False,
-                            do_pre_auto_corr=False, do_post_auto_corr=False,
-                            do_pre_cross_corr=True, do_post_cross_corr=False),
+                            do_recon_std=True, do_post_auto_rppi=True,
+                            do_post_cross=True, do_recon_ite=True,
+                            do_pre_auto_corr=True, do_post_auto_corr=True,
+                            do_pre_cross_corr=True, do_post_cross_corr=True),
                           reals)
                     p.close()
                     p.join()
@@ -1298,26 +1332,27 @@ if __name__ == "__main__":
         optimise_fitter('gen_base1', 'pre-recon', brute=True)
     if do_fit:
         for model_name in model_names:
-            # for recon in recon_types:
-            '''
-            best-fit parameters for 16-box sim post-recon:
-            real-space matter: beta = 0.00, r_rescale_factor = 1.00174
-            redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
+            recon_types = ['post-recon-std', 'post-recon-ite']
+            for recon in recon_types:
+                '''
+                best-fit parameters for 16-box sim post-recon:
+                real-space matter: beta = 0.00, r_rescale_factor = 1.00174
+                redshift-space ga: beta = 0.00, r_rescale_factor = 1.00232
 
-            best-fit parameters for 20-box sim post-recon:
-            real-space matter: beta = 0.00, r_rescale_factor = 0.99843
-            redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
+                best-fit parameters for 20-box sim post-recon:
+                real-space matter: beta = 0.00, r_rescale_factor = 0.99843
+                redshift-space ga: beta = 0.00, r_rescale_factor = 0.99707
 
-            we expect a 0.2% shift due to nonlinear evolutions when fitting
-            with a linear power spectrum which does not account for
-            nonlinear effects; no need to fiddle with r-rescaling
+                we expect a 0.2% shift due to nonlinear evolutions when fitting
+                with a linear power spectrum which does not account for
+                nonlinear effects; no need to fiddle with r-rescaling
 
-            best-fit parameters for 36-box joint set:
-            real-space matter pre-/post-recon: beta = 0.00
-            redshift-space galaxy pre-recon:   beta = 0.00
-            (lower chisq 50 vs 80, a insensitive to beta to 0.2%, )
-            redshift-space galaxy post-recon:  beta = 0.00
-            '''
-            # model_name = 'gen_base1'
-            cache = FitterCache(model_name, 'pre-recon',
-                                force_isotropy=False, beta=0, rmin=50)
+                best-fit parameters for 36-box joint set:
+                real-space matter pre-/post-recon: beta = 0.00
+                redshift-space galaxy pre-recon:   beta = 0.00
+                (lower chisq 50 vs 80, a insensitive to beta to 0.2%, )
+                redshift-space galaxy post-recon:  beta = 0.00
+                '''
+                # model_name = 'gen_base1'
+                cache = FitterCache(model_name, recon, jk=False,
+                                    force_isotropy=False, beta=0, rmin=50)

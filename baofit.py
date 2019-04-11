@@ -49,7 +49,7 @@ class baofit3D:
             # Sigma_para = 4  # Mpc/h
         else:  # pre-recon peak is wider
             if self.sample_type == 'mat':
-                Sigma_perp = 2  # 2 Mpc/h for matter, 5 Mpc/h for galaxies
+                Sigma_perp = 1.5  # 1.5 Mpc/h for matter, 5 Mpc/h for galaxies
             elif self.sample_type == 'gal':
                 Sigma_perp = 5
             # Sigma_para = 10  # Mpc/h
@@ -103,10 +103,10 @@ class baofit3D:
         self.B2_ln_width = 100
         self.A = np.zeros(6)
         self.range_ok = False
-        print(('\nReconstructed: {}, force isotropy: {}, '
+        print(('\nReconstructed: {}, sample: {}, force isotropy: {}, '
                'xitemp rescale factor: {:.2f}, data vector shape: {}')
-              .format(reconstructed, force_isotropy, xi_temp_rescale,
-                      self.dv.shape))
+              .format(reconstructed, sample_type, force_isotropy,
+                      xi_temp_rescale, self.dv.shape))
 
     def xi_r_mu(self, r, mu, ell_max=6):
         ''' input r may be 2D, return 2D xi_r_mu(r, mu) '''
@@ -197,35 +197,35 @@ class baofit3D:
     def chisq_scan(self):
         '''
         matter pre-recon:
-                ars = np.arange(1.0060, 1.0120, 0.00005)
-                ats = np.arange(0.9970, 1.0020, 0.00005)
+                ars = np.arange(1.0065, 1.0110, 0.00005)
+                ats = np.arange(0.9985, 1.0020, 0.00005)
 
         matter post-recon:
-                ars = np.arange(0.9960, 1.0000, 0.00005)
-                ats = np.arange(0.9990, 1.0010, 0.00005)
+                ars = np.arange(0.9960, 0.9990, 0.00005)
+                ats = np.arange(0.9995, 1.0020, 0.00005)
 
         galaxy pre-recon:
-                ars = np.arange(0.9980, 1.0170, 0.0001)
-                ats = np.arange(1.0020, 1.0190, 0.0001)
+                ars = np.arange(0.990, 1.016, 0.0001)
+                ats = np.arange(0.993, 1.016, 0.0001)
 
         galaxy post-recon:
-                ars = np.arange(0.9900, 1.0040, 0.0001)
-                ats = np.arange(0.9950, 1.0005, 0.0001)
+                ars = np.arange(0.990, 1.016, 0.0001)
+                ats = np.arange(0.993, 1.016, 0.0001)
         '''
         if self.sample_type == 'mat':
             if not self.reconstructed:  # pre-recon
-                ars = np.arange(1.0060, 1.0120, 0.00005)
-                ats = np.arange(0.9970, 1.0020, 0.00005)
+                ars = np.arange(1.0065, 1.0110, 0.00005)
+                ats = np.arange(0.9985, 1.0020, 0.00005)
             else:  # post=recon
-                ars = np.arange(0.9960, 1.0000, 0.00005)
-                ats = np.arange(0.9990, 1.0010, 0.00005)
+                ars = np.arange(0.9960, 0.9990, 0.00005)
+                ats = np.arange(0.9995, 1.0020, 0.00005)
         elif self.sample_type == 'gal':
             if not self.reconstructed:  # pre-recon
-                ars = np.arange(0.9980, 1.0170, 0.0001)
-                ats = np.arange(1.0020, 1.0190, 0.0001)
+                ars = np.arange(0.990, 1.016, 0.0001)
+                ats = np.arange(0.993, 1.016, 0.0001)
             else:  # post-recon
-                ars = np.arange(0.9900, 1.0040, 0.0001)
-                ats = np.arange(0.9950, 1.0005, 0.0001)
+                ars = np.arange(0.990, 1.016, 0.0001)
+                ats = np.arange(0.993, 1.016, 0.0001)
         chisq_grid = np.zeros((ars.size, ats.size))  # default value is 0
         B0_grid = np.zeros(chisq_grid.shape)
         B2_grid = np.zeros(chisq_grid.shape)
@@ -260,8 +260,11 @@ class baofit3D:
         self.at = at
         self.xitemp = self.make_xi_temp()
         chisq = self.B0_B2_optimize((B0, B2))  # this sets A hat coefficients
+        dxi = self.dv - self.mv
+        print('dxi_0:', np.mean(dxi[:self.n]),
+              'dxi_2:', np.mean(dxi[self.n:]), 'chisq', chisq)  # debug
         assert chisq == chisq_min
-        r_full = np.arange(1, 151, 1)  # debug
+        r_full = np.arange(2.5, 150, 5)  # np.arange(1, 151, 1)  # debug
         self.xitemp = self.make_xi_temp(r0=r_full)
         ximod0, ximod2 = self.make_model_vector(B0, B2, r0=r_full)
         return np.array([r_full, ximod0, ximod2,
@@ -278,6 +281,7 @@ def baofit(argv):
                 os.mkdir(os.path.dirname(path_cg))
             except FileExistsError:
                 pass
+        print('inputs are:\n', argv)
         data = np.loadtxt(path_p_lin)
         k = data[:, 0]
         P_lin = data[:, 1]
@@ -332,7 +336,8 @@ def baofit(argv):
         np.savetxt(path_cg.replace('chisq_grid.txt', 'xi_0_2_model.txt'),
                    model_dump, fmt=txtfmt)
         ar, at, chisq = chisq_table[np.argmin(chisq_table[:, 2]), :]
-        print('\nBest-fit ar, at, chisq: ({:.4f}, {:.4f}), {:.2f}, range OK:'
+        print(('\nBest-fit ar, at, chisq: ({:.4f}, {:.4f}), {:.2f}, '
+               'range OK: {}')
               .format(ar, at, chisq, fit.range_ok))
         return ar, at
     except Exception as E:

@@ -334,15 +334,16 @@ def process_particle_props(pt, h, halo_m_prop='halo_mvir', perihelion=False,
     pt['vx_pec'] = pt['vx'] - pt['halo_vx']
     pt['vy_pec'] = pt['vy'] - pt['halo_vy']
     pt['vz_pec'] = pt['vz'] - pt['halo_vz']
-    v_pec = np.array([pt['vx_pec'], pt['vy_pec'], pt['vz_pec']]).T
+    v_pec = np.array([pt['vx_pec'], pt['vy_pec'], pt['vz_pec']]).T  # vector
     # for some particles close to halo centre due to single precision, we find
     # v_pec = v_rad = v_tan = 0, and r_0 = r_min
     pt['v_pec'] = np.linalg.norm(v_pec, axis=1)  # peculiar speed km/s
     # dimensionless r relative hat
     norm = np.linalg.norm(r_rel, axis=1)
     norm = norm.reshape(len(norm), 1)  # reshape it into a column vector
-    r_rel_hat = r_rel / norm
-    pt['v_rad'] = np.sum(np.multiply(v_pec, r_rel_hat), axis=1)  # dot prod
+    r_rel_hat = r_rel / norm  # unit vector in the relative/radial direction
+    # dot product (radial component of peculiar speed) could be negative
+    pt['v_rad'] = np.abs(np.sum(np.multiply(pt['v_pec'] , r_rel_hat), axis=1))
     pt['v_tan'] = np.sqrt(np.square(pt['v_pec']) - np.square(pt['v_rad']))
     # calculate perihelion distance for bias s_p, note h factors
     if perihelion:
@@ -586,10 +587,10 @@ def initialise_model(redshift, model_name, halo_m_prop='halo_m'):
             model.param_dict['logM1'] = 13.805
             model.param_dict['alpha'] = 1.05
         elif model_name == 'gen_base6':
-            model.param_dict['logM1'] = 13.793  # tune this
+            model.param_dict['logM1'] = 13.770
             model.param_dict['alpha'] = 0.75
         elif model_name == 'gen_base7':
-            model.param_dict['logM1'] = 13.829  # tune this
+            model.param_dict['logM1'] = 13.848
             model.param_dict['alpha'] = 1.25
         elif model_name == 'gen_ass1':
             model.param_dict['A_cen'] = 1
@@ -839,7 +840,7 @@ def make_galaxies(model):
         if model.param_dict['s_p'] != 0:
             pt['rank_s_p'][m:m+n] = pt['r_perihelion'][m:m+n] \
                 .argsort()[::-1].argsort()
-
+    print('r = {:2d}, calculating new probabilities...'.format(model.r))
     # calculate new probability regardless of decoration parameters
     # if any s is zero, the formulae guarantee the random numbers are unchanged
     # only re-rank halos where subsamp_len >= 2
